@@ -1,6 +1,78 @@
-# Initial native KDE desktop applications
-# Kept deliberately small; the Plasma/session dependency closure is resolved
-# by the image build rather than hard-coding the full desktop here.
+# Native Plasma/KDE packages available to RakuKrisOS through RUM.
+# These are deliberately NOT part of the immutable base unless promoted later.
+# RUM installs without weak/suggested dependencies and removal never performs autoremove.
+
+# Initial applications
 dolphin
+dolphin-libs
 konsole
+konsole-part
 kate
+kate-libs
+spectacle
+ark
+gwenview
+okular
+kcalc
+
+# Additional Plasma components
+plasma-systemmonitor
+plasma-browser-integration
+plasma-activities
+plasma-activities-stats
+plasma-keyboard
+plasma-breeze
+plasma-breeze-common
+plasma-breeze-qt6
+plasma5support
+
+# KIO / KDE Frameworks
+kio-admin
+kf6-kcmutils
+kf6-kirigami
+kf6-kirigami-addons
+kf6-frameworkintegration
+kf6-kfilemetadata
+kf6-kglobalaccel
+kf6-kio-widgets
+kf6-kquickcharts
+kf6-krunner
+kf6-ksvg
+kf6-ktexteditor
+kf6-kuserfeedback
+kf6-kwallet
+kf6-kwindowsystem
+kf6-networkmanager-qt
+kf6-bluez-qt
+kf6-solid
+kf6-syntax-highlighting
+kf6-purpose
+
+# Bluetooth / connectivity
+bluedevil
+bluez
+bluez-cups
+bluez-obexd
+kde-connect
+
+# Desktop utilities / integration
+kde-gtk-config
+kdegraphics-thumbnailers
+ibus
+ibus-gtk3
+ibus-gtk4
+ibus-libs
+kinfocenter
+kmenuedit
+ksshaskpass
+kwalletmanager5
+
+# Themes / boot integration
+breeze-cursor-theme
+breeze-gtk
+breeze-gtk-common
+breeze-icon-theme
+kf6-breeze-icons
+qqc2-breeze-style
+ocean-sound-theme
+breeze-plymouth
