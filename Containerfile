@@ -1,3 +1,51 @@
+# Build only the initrd overlay binary we need, from a pinned RakuOS source
+# revision. RakuKrisOS patches one important first-boot behavior: an empty
+# upperdir is seeded with the base rpmdb and then mounted immediately instead
+# of returning and leaving /usr unoverlaid.
+FROM fedora:44 AS overlay-builder
+ARG RAKUOS_SOURCE_REV=7d6a4e9ed535eb00f425ef7261a254a5d0043bab
+RUN dnf5 -y --setopt=install_weak_deps=False install cargo rust curl python3 \
+    && dnf5 clean all
+RUN set -eux; \
+    mkdir -p /src/crates/initrd/src/bin; \
+    base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
+    curl -fL "$base/Cargo.toml" -o /src/Cargo.toml; \
+    curl -fL "$base/Cargo.lock" -o /src/Cargo.lock; \
+    curl -fL "$base/crates/initrd/Cargo.toml" -o /src/crates/initrd/Cargo.toml; \
+    curl -fL "$base/crates/initrd/src/bin/overlay_mount.rs" -o /src/crates/initrd/src/bin/overlay_mount.rs; \
+    python3 - <<'PY'
+from pathlib import Path
+p = Path('/src/crates/initrd/src/bin/overlay_mount.rs')
+s = p.read_text()
+old = '''    // Upper dir empty — seed RPM db and exit for sync to install
+    if dir_is_empty(&upper_dir) {
+        log("seeding RPM db into upper dir before first install...");
+        let seed_rpmdb = upper_dir.join("share/rpm");
+        fs::create_dir_all(&seed_rpmdb)?;
+        copy_dir_contents(&base_rpm_db, &seed_rpmdb)?;
+        remove_rpmdb_locks(&seed_rpmdb);
+        log("RPM db seeded — sync will handle install.");
+        return Ok(());
+    }
+'''
+new = '''    // An empty upperdir is valid on a fresh Fedora Minimal deployment.
+    // Seed the rpmdb view, but DO NOT return: /usr must already be an overlay
+    // before switch-root so RUM can safely persist native packages later.
+    if dir_is_empty(&upper_dir) {
+        log("seeding RPM db into empty upper dir...");
+        let seed_rpmdb = upper_dir.join("share/rpm");
+        fs::create_dir_all(&seed_rpmdb)?;
+        copy_dir_contents(&base_rpm_db, &seed_rpmdb)?;
+        remove_rpmdb_locks(&seed_rpmdb);
+        log("RPM db seeded — continuing to mount persistent overlay.");
+    }
+'''
+if old not in s:
+    raise SystemExit('expected upstream empty-upper block not found; refusing to build against changed source')
+p.write_text(s.replace(old, new, 1))
+PY
+RUN cd /src && cargo build --locked --release -p rakuos-initrd
+
 FROM quay.io/bootc-devel/fedora-bootc-44-minimal:latest
 
 ARG RAKUKRISOS_RELEASE=0.1.0
@@ -28,41 +76,37 @@ RUN set -eux; \
     rm -f /tmp/base-packages.txt; \
     ! rpm -q glibc-all-langpacks >/dev/null 2>&1
 
-# RakuOS runtime infrastructure. RUM is installed last because rum-dnf-shim
-# intentionally supersedes the dnf/dnf5 command-line package manager.
+# RakuOS runtime infrastructure. This is temporary until rakuos-core-slim is
+# packaged; the initrd overlay binary is replaced below with our pinned,
+# Minimal-safe build. RUM is installed last because rum-dnf-shim supersedes
+# the dnf/dnf5 command-line package manager.
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         rakuos-core rakuos-rum rum-dnf-shim
+COPY --from=overlay-builder /src/target/release/rakuos-overlay-mount \
+    /usr/lib/rakuos/initrd/rakuos-overlay-mount
+RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
 COPY config/rum.conf /etc/rum/rum.conf
 
-# Full RakuOS seeds a factory application set. RakuKrisOS deliberately does
-# not: boot must never depend on network availability, repo health, or a RUM
-# transaction before the display manager starts.
-#
-# Upstream overlay_mount.rs does NOT mount /usr when upperdir is completely
-# empty; it seeds only the rpmdb and returns. Seed one harmless hidden file in
-# the factory upperdir so first boot always mounts overlayfs, while keeping
-# packages.list empty so overlay-sync exits immediately and never touches the
-# network/RUM path during normal boot.
+# Starting from Fedora Minimal means all RakuOS state contracts must be seeded
+# explicitly. No default native applications are installed at boot: an empty
+# packages.list makes overlay-sync a no-op, so login never depends on network
+# or repository availability.
 RUN set -eux; \
-    install -d -m 0755 \
-      /usr/share/rakuos \
-      /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos; \
+    install -d -m 0755 /usr/share/rakuos /usr/share/factory/var/lib/rakuos; \
     printf '%s\n' plasma > /usr/share/rakuos/de-name; \
     printf '%s\n' \
       bootc ostree rakuos-core rakuos-rum rum-dnf-shim \
       plasma-workspace plasma-desktop kwin plasma-login-manager \
       > /usr/share/rakuos/protected-packages.txt; \
     : > /usr/share/factory/var/lib/rakuos/packages.list; \
-    : > /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \
     /usr/libexec/rakuos/generate-base-manifest; \
     test -s /usr/share/rakuos/base-manifest.txt
 
-# rakuos-core's RPM %post regenerates initramfs under /boot and ignores dracut
-# errors. A bootc image must instead carry initramfs alongside the kernel under
-# /usr/lib/modules/$kver/initramfs.img; bootc copies it to /boot at deployment.
-# Rebuild explicitly and fail the image build if the RakuOS initrd module is not
-# actually present. Then remove the legacy /boot initramfs generated by %post.
+# rakuos-core's RPM %post may generate an initramfs under /boot. A bootc image
+# instead carries initramfs next to the kernel under /usr/lib/modules/$kver.
+# Rebuild after replacing the overlay binary and fail if the module/binary are
+# not really present in the initramfs. Remove legacy /boot initramfs files.
 RUN set -eux; \
     found_kernel=0; \
     for moddir in /usr/lib/modules/*; do \
@@ -102,8 +146,7 @@ RUN set -eux; \
     test -s /usr/share/rakuos/base-manifest.txt; \
     test -e /usr/share/factory/var/lib/rakuos/packages.list; \
     test ! -s /usr/share/factory/var/lib/rakuos/packages.list; \
-    test -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \
-    test -d /usr/share/icons/breeze; \
+    test ! -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \
     rpm -q glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it; \
     ! rpm -q glibc-all-langpacks >/dev/null 2>&1; \
     bootc container lint
