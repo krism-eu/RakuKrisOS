@@ -10,7 +10,7 @@ COPY build_files/patch_overlay_mount.py /usr/local/libexec/patch_overlay_mount.p
 RUN set -eux; \
     mkdir -p /src/crates/initrd/src/bin; \
     base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
-    curl -fL "$base/Cargo.toml" -o /src/Cargo.toml; \
+    printf '%s\n' '[workspace]' 'members = ["crates/initrd"]' 'resolver = "2"' > /src/Cargo.toml; \
     curl -fL "$base/Cargo.lock" -o /src/Cargo.lock; \
     curl -fL "$base/crates/initrd/Cargo.toml" -o /src/crates/initrd/Cargo.toml; \
     curl -fL "$base/crates/initrd/src/bin/overlay_mount.rs" -o /src/crates/initrd/src/bin/overlay_mount.rs; \
