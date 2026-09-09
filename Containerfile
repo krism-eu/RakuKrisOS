@@ -7,10 +7,10 @@ ARG RAKUOS_SOURCE_REV=7d6a4e9ed535eb00f425ef7261a254a5d0043bab
 RUN dnf5 -y --setopt=install_weak_deps=False install cargo rust curl python3 \
     && dnf5 clean all
 COPY build_files/patch_overlay_mount.py /usr/local/libexec/patch_overlay_mount.py
+COPY build_files/initrd-Cargo.lock /src/crates/initrd/Cargo.lock
 RUN set -eux; \
     mkdir -p /src/crates/initrd/src/bin; \
     base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
-    curl -fL "$base/Cargo.lock" -o /src/crates/initrd/Cargo.lock; \
     curl -fL "$base/crates/initrd/Cargo.toml" -o /src/crates/initrd/Cargo.toml; \
     printf '\n[workspace]\n' >> /src/crates/initrd/Cargo.toml; \
     curl -fL "$base/crates/initrd/src/bin/overlay_mount.rs" -o /src/crates/initrd/src/bin/overlay_mount.rs; \
