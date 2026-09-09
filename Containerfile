@@ -1,10 +1,10 @@
-FROM quay.io/fedora/fedora-bootc:44
+FROM quay.io/bootc-devel/fedora-bootc-44-minimal:latest
 
 ARG RAKUKRISOS_RELEASE=0.1.0
 
 LABEL org.opencontainers.image.title="RakuKrisOS"
 LABEL org.opencontainers.image.version="${RAKUKRISOS_RELEASE}"
-LABEL org.opencontainers.image.description="Fedora 44 bootc desktop with the RakuOS persistent overlay and RUM"
+LABEL org.opencontainers.image.description="Fedora 44 bootc Minimal desktop with the RakuOS persistent overlay and RUM"
 
 # RakuOS uses its own signing key. Keep the repository definition explicit so
 # image builds and later RUM transactions use the same trust configuration.
