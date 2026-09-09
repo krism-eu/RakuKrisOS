@@ -81,6 +81,11 @@ jobs:
             test -e /usr/lib/systemd/system/plasmalogin.service
             test -e /usr/lib/systemd/system/rakuos-overlay-sync.service
             test -e /usr/lib/systemd/system/rakuos-base-protect.service
+            test -e /etc/systemd/system/rakuos-base-protect.service.d/rakukrisos.conf
+            grep -qx "Restart=on-failure" /etc/systemd/system/rakuos-base-protect.service.d/rakukrisos.conf
+            systemd-analyze verify rakuos-base-protect.service
+            systemctl --root=/ is-enabled rakuos-base-protect.service
+            systemctl --root=/ is-enabled plasmalogin.service
             test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount
             test -e /usr/lib/dracut/modules.d/90rakuos-overlay/module-setup.sh
 
