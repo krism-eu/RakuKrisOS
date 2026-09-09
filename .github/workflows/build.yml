@@ -89,6 +89,20 @@ jobs:
             test -e /usr/share/factory/var/lib/rakuos/packages.list
             test ! -s /usr/share/factory/var/lib/rakuos/packages.list
 
+            # No fake upperdir content is allowed to make the mount happen.
+            test ! -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap
+
+            # The actual initramfs shipped with every kernel must contain the
+            # persistent-overlay binary and its dracut module.
+            found_initramfs=0
+            for img in /usr/lib/modules/*/initramfs.img; do
+              test -f "$img" || continue
+              found_initramfs=1
+              lsinitrd "$img" | grep -q rakuos-overlay-mount
+              lsinitrd "$img" | grep -q 90rakuos-overlay
+            done
+            test "$found_initramfs" -eq 1
+
             ! rpm -q glibc-all-langpacks >/dev/null 2>&1
           '
 
