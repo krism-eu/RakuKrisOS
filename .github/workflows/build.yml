@@ -1,4 +1,4 @@
-name: Build RakuKrisOS
+name: Build and Publish RakuKrisOS
 
 on:
   workflow_dispatch:
@@ -9,6 +9,8 @@ on:
       - build_files/**
       - config/**
       - .github/workflows/build.yml
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -19,7 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/rakukrisos
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -27,36 +30,71 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah
 
       - name: Normalize image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
-      - name: Build image
+      - name: Build OCI image
         run: |
           set -euxo pipefail
-          sudo podman build \
+          sudo buildah bud \
             --pull=always \
-            --tag "${IMAGE_NAME}:${GITHUB_SHA}" \
-            --tag "${IMAGE_NAME}:latest" \
+            --format oci \
+            --build-arg FEDORA_VERSION=44 \
+            --tag "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}" \
+            --tag "${REGISTRY}/${IMAGE_NAME}:latest" \
             -f Containerfile .
 
-      - name: Validate image
+      - name: Validate image contents
         run: |
           set -euxo pipefail
-          sudo podman run --rm "${IMAGE_NAME}:${GITHUB_SHA}" rpm -q \
+          sudo buildah from --name rakukrisos-validation "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          sudo buildah run rakukrisos-validation -- rpm -q \
             bootc ostree rakuos-core rakuos-rum plasma-workspace kwin sddm
-          sudo podman run --rm "${IMAGE_NAME}:${GITHUB_SHA}" \
+          sudo buildah run rakukrisos-validation -- \
             sh -c 'test -x /usr/bin/rum && test -r /etc/rum/rum.conf && grep -q "install_weak_deps=0" /etc/rum/rum.conf && grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf'
+          sudo buildah rm rakukrisos-validation
 
-      - name: Login to GHCR
+      - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push image
+      # Push performs the actual layer compression. Use OCI + zstd explicitly
+      # so bootc pulls a deterministic, compact image instead of depending on
+      # the runner's containers.conf defaults.
+      - name: Push immutable image
         if: github.event_name != 'pull_request'
         run: |
           set -euxo pipefail
-          sudo podman push "${IMAGE_NAME}:${GITHUB_SHA}"
-          sudo podman push "${IMAGE_NAME}:latest"
+          sudo buildah push \
+            --format oci \
+            --compression-format zstd \
+            --compression-level 10 \
+            "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+
+      - name: Push latest image
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euxo pipefail
+          sudo buildah push \
+            --format oci \
+            --compression-format zstd \
+            --compression-level 10 \
+            "${REGISTRY}/${IMAGE_NAME}:latest"
+
+      - name: Print bootc switch command
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Image: ${REGISTRY}/${IMAGE_NAME}:latest"
+          echo "Switch: sudo bootc switch ${REGISTRY}/${IMAGE_NAME}:latest"
