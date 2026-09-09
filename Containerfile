@@ -39,7 +39,9 @@ COPY config/rum.conf /etc/rum/rum.conf
 # Removing SELinux before that point can make ostree-finalize-staged fail and
 # produce exactly the kind of deployment rollback RakuKrisOS must avoid.
 
-RUN systemctl enable plasma-login-manager.service \
+# Fedora 44's package is named plasma-login-manager, but the system unit is
+# plasmalogin.service and it owns the display-manager.service alias.
+RUN systemctl enable --force plasmalogin.service \
     && systemctl set-default graphical.target
 
 # Basic image invariants: fail the build here rather than publishing an image
@@ -48,4 +50,4 @@ RUN test -x /usr/bin/bootc \
     && test -x /usr/bin/ostree \
     && test -x /usr/bin/rum \
     && test -e /usr/lib/systemd/system/ostree-finalize-staged.service \
-    && test -e /usr/lib/systemd/system/plasma-login-manager.service
+    && test -e /usr/lib/systemd/system/plasmalogin.service
