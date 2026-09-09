@@ -1,0 +1,109 @@
+# RakuKrisOS rakuos-core-slim component manifest
+#
+# Goal: preserve only the RakuOS persistent /usr overlay and the minimal
+# integration needed by RUM/bootc. Everything else stays out of the base image.
+
+[keep]
+# Persistent /usr overlay - mandatory
+crates/initrd/src/bin/overlay_mount.rs
+crates/overlay/src/bin/sync.rs
+crates/overlay/src/bin/reset.rs
+crates/overlay/src/lib.rs
+data/dracut/modules.d/90rakuos-overlay/module-setup.sh
+data/dracut/modules.d/90rakuos-overlay/rakuos-overlay-mount.service
+
+# Base/overlay metadata - mandatory for safe RUM operation
+crates/systems/src/bin/base_protect.rs
+crates/systems/src/bin/generate_base_manifest.rs
+
+# Overlay synchronization around graphical login
+# Keep initially; remove only if testing proves the initrd/RUM split no longer needs it.
+data/systemd/system/rakuos-overlay-sync.service
+data/systemd/system/display-manager.service.d/rakuos-overlay-sync.conf
+
+# Flatpak itself remains supported by RakuKrisOS, but Flatpak-specific RakuOS
+# repair/watcher logic is optional and is not part of the first slim core.
+
+[drop]
+# Legacy RakuOS package-management wrappers: RUM is the package manager.
+crates/pkgmgr/src/bin/install.rs
+crates/pkgmgr/src/bin/remove.rs
+crates/pkgmgr/src/bin/list.rs
+crates/pkgmgr/src/bin/update.rs
+crates/pkgmgr/src/bin/updater.rs
+crates/pkgmgr/src/bin/cache_clean.rs
+crates/pkgmgr/src/bin/rakupkg.rs
+
+# General RakuOS first-boot / distro policy machinery
+crates/systems/src/bin/system_setup.rs
+crates/systems/src/bin/rakuos.rs
+crates/systems/src/bin/user.rs
+crates/systems/src/bin/flatpak_wrapper_gen.rs
+crates/systems/src/bin/flatpak_event_watcher.rs
+
+data/systemd/system/rakuos-setup.service
+data/systemd/system/rakuos-updater.service
+data/systemd/system/rakuos-updater.timer
+data/systemd/system/rakuos-cache-clean.service
+data/systemd/system/rakuos-cache-clean.timer
+data/systemd/system/rakuos-flatpak-watcher.service
+data/systemd/user/rakuos-user.service
+
+# Gaming / NVIDIA / hardware-specific / AI
+# Explicitly excluded from RakuKrisOS v1.
+data/scripts/setup-g733zm-audio
+data/scripts/setup-gaming
+data/scripts/setup-nvidia
+data/scripts/setup-nvidia-legacy
+data/scripts/setup-lsfg-vk
+data/scripts/setup-ollama
+data/scripts/setup-virtualization
+
+# Kernel signing / TPM helpers are not part of v1 because the first release
+# uses Fedora's stock kernel. Secure Boot will be tested separately.
+data/scripts/enroll-secureboot-key
+data/scripts/reenroll-tpm2
+data/scripts/rakuos-sign-modules
+
+# RakuOS shell/coreutils policy is not part of the OS core.
+data/scripts/setup-sudo
+data/scripts/setup-uutils
+
+# Nix and Podman maintenance are unrelated to the overlay core.
+data/systemd/system/nix.mount
+data/systemd/system/podman-prune.service
+data/systemd/system/podman-prune.timer
+
+# RakuOS-specific memory/gaming tuning is excluded.
+data/systemd/system/dmemcg-booster.service
+data/systemd/user/dmemcg-booster-user.service
+
+# Flatpak repair/cleanup policy is excluded from the first slim core.
+data/systemd/system/flatpak-cleanup.service
+data/systemd/system/flatpak-cleanup.timer
+data/systemd/system/flatpak-repair.service
+data/systemd/system/flatpak-repair.timer
+data/flatpak-fixes/com.core447.StreamController.sh
+data/flatpak-fixes/org.mozilla.firefox.sh
+
+# rpm-ostree cleanup jobs are not needed for a bootc-first RakuKrisOS base.
+data/systemd/system/rpm-ostree-clean-deployments.service
+data/systemd/system/rpm-ostree-clean-deployments.timer
+data/systemd/system/rpm-ostree-clean-metadata.service
+data/systemd/system/rpm-ostree-clean-metadata.timer
+
+# RakuOS automatic bootc policy is excluded initially. RakuKrisOS will use
+# direct bootc switch/upgrade while deployment/fallback behavior is validated.
+data/systemd/system/rakuos-bootc-switch.service
+data/systemd/system/rakuos-bootc-upgrade.service
+
+[review]
+# Upstream marks overlay-update deprecated and does not package it. Keep source
+# only as reference; do not install it.
+crates/overlay/src/bin/update.rs
+
+# Revisit only if RUM requires any of these at runtime after the slim package
+# is built. Do not add them pre-emptively.
+flatpak
+jq
+dnf5
