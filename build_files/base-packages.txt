@@ -6,3 +6,35 @@ composefs-libs
 dracut
 ostree
 systemd
+
+# Minimal graphical desktop base: Plasma workspace + KWin + SDDM
+plasma-workspace
+plasma-workspace-common
+plasma-workspace-libs
+kwin
+kwin-common
+kwin-libs
+kwayland
+sddm
+
+# Core desktop integration required for a usable Plasma session
+plasma-nm
+plasma-pa
+plasma-integration
+kde-cli-tools
+polkit-kde
+polkit-qt6-1
+powerdevil
+kglobalacceld
+ksystemstats
+xdg-desktop-portal
+xdg-desktop-portal-kde
+xdg-user-dirs
+
+# Audio/session plumbing
+pipewire
+pipewire-alsa
+pipewire-pulse
+pipewire-jack-audio-connection-kit
+wireplumber
+phonon-qt6
