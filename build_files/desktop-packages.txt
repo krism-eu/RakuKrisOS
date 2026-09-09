@@ -1,0 +1,6 @@
+# Initial native KDE desktop applications
+# Kept deliberately small; the Plasma/session dependency closure is resolved
+# by the image build rather than hard-coding the full desktop here.
+dolphin
+konsole
+kate
