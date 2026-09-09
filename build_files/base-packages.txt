@@ -16,6 +16,7 @@ kwin-common
 kwin-libs
 kwayland
 plasma-login-manager
+kcm-plasmalogin
 
 # Core desktop integration required for a usable Plasma session
 plasma-nm
