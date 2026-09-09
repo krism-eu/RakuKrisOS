@@ -6,17 +6,27 @@ composefs-libs
 dracut
 ostree
 systemd
+flatpak
 
-# Minimal graphical desktop base: Plasma workspace + KWin + Plasma Login Manager
+# Minimal graphical desktop base: Plasma shell/session + KWin
 plasma-workspace
 plasma-workspace-common
 plasma-workspace-libs
+plasma-desktop
+plasma-systemsettings
 kwin
 kwin-common
 kwin-libs
 kwayland
+kscreen
+kscreenlocker
+
+# Plasma Login Manager: keep the same functional stack as RakuOS KDE stock
 plasma-login-manager
 kcm-plasmalogin
+kde-settings-plasmalogin
+kde-settings-plasma
+plasma-keyboard
 
 # Core desktop integration required for a usable Plasma session
 plasma-nm
@@ -35,6 +45,21 @@ xdg-user-dirs
 # Audio/session plumbing
 pipewire
 pipewire-alsa
+pipewire-pulseaudio
 pipewire-jack-audio-connection-kit
 wireplumber
 phonon-qt6
+
+# Small, explicit visual baseline. Do not pull all font families/themes.
+breeze-icon-theme
+kf6-breeze-icons
+breeze-cursor-theme
+google-noto-sans-fonts
+google-noto-sans-mono-fonts
+google-noto-color-emoji-fonts
+
+# Languages/locales: English + Italian only; never glibc-all-langpacks.
+glibc-langpack-en
+glibc-langpack-it
+langpacks-core-en
+langpacks-core-it
