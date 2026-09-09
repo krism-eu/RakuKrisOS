@@ -56,10 +56,42 @@ jobs:
         run: |
           set -euxo pipefail
           sudo buildah from --name rakukrisos-validation "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+
           sudo buildah run rakukrisos-validation -- rpm -q \
-            bootc ostree rakuos-core rakuos-rum plasma-workspace kwin plasma-login-manager
-          sudo buildah run rakukrisos-validation -- \
-            sh -c 'test -x /usr/bin/rum && test -r /etc/rum/rum.conf && grep -q "install_weak_deps=0" /etc/rum/rum.conf && grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf && test -e /usr/lib/systemd/system/plasma-login-manager.service'
+            bootc ostree rakuos-core rakuos-rum rum-dnf-shim \
+            plasma-workspace plasma-desktop kwin \
+            plasma-login-manager kcm-plasmalogin kde-settings-plasmalogin \
+            pipewire-pulseaudio \
+            glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it \
+            google-noto-sans-fonts google-noto-sans-mono-fonts google-noto-color-emoji-fonts
+
+          sudo buildah run rakukrisos-validation -- sh -euxc '
+            test -x /usr/bin/rum
+            test -r /etc/rum/rum.conf
+            grep -q "install_weak_deps=0" /etc/rum/rum.conf
+            grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf
+
+            test -e /usr/lib/systemd/system/plasmalogin.service
+            test -e /usr/lib/systemd/system/rakuos-overlay-sync.service
+            test -e /usr/lib/systemd/system/rakuos-base-protect.service
+            test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount
+            test -e /usr/lib/dracut/modules.d/90rakuos-overlay/module-setup.sh
+
+            test -s /usr/share/rakuos/de-name
+            grep -qx plasma /usr/share/rakuos/de-name
+            test -s /usr/share/rakuos/protected-packages.txt
+            test -s /usr/share/rakuos/base-manifest.txt
+            test -s /usr/share/factory/var/lib/rakuos/packages.list
+            grep -qx dolphin /usr/share/factory/var/lib/rakuos/packages.list
+            grep -qx konsole /usr/share/factory/var/lib/rakuos/packages.list
+            grep -qx kate /usr/share/factory/var/lib/rakuos/packages.list
+
+            test -d /usr/share/icons/breeze
+            ! rpm -q glibc-all-langpacks >/dev/null 2>&1
+          '
+
+          # bootc lint is a deployment-oriented validation, not just an RPM check.
+          sudo buildah run rakukrisos-validation -- bootc container lint
           sudo buildah rm rakukrisos-validation
 
       - name: Login to GitHub Container Registry
@@ -70,9 +102,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push performs the actual layer compression. Use OCI + zstd explicitly
-      # so bootc pulls a deterministic, compact image instead of depending on
-      # the runner's containers.conf defaults.
       - name: Push immutable image
         if: github.event_name != 'pull_request'
         run: |
