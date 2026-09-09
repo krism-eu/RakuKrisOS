@@ -19,12 +19,12 @@ RUN curl --fail --silent --show-error --location \
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         bootc bootupd composefs composefs-libs dracut ostree systemd flatpak \
         plasma-workspace plasma-workspace-common plasma-workspace-libs \
-        kwin kwin-common kwin-libs kwayland sddm \
+        kwin kwin-common kwin-libs kwayland plasma-login-manager \
         plasma-nm plasma-pa plasma-integration \
         kde-cli-tools polkit-kde polkit-qt6-1 powerdevil kglobalacceld ksystemstats \
         xdg-desktop-portal xdg-desktop-portal-kde xdg-user-dirs \
-        pipewire pipewire-alsa pipewire-pulse \
-        pipewire-jack-audio-connection-kit wireplumber phonon-qt6 \
+        pipewire pipewire-alsa pipewire-jack-audio-connection-kit \
+        wireplumber phonon-qt6 \
     && dnf5 clean all
 
 # RakuOS runtime infrastructure. RUM is installed last because rum-dnf-shim
@@ -39,7 +39,7 @@ COPY config/rum.conf /etc/rum/rum.conf
 # Removing SELinux before that point can make ostree-finalize-staged fail and
 # produce exactly the kind of deployment rollback RakuKrisOS must avoid.
 
-RUN systemctl enable sddm.service \
+RUN systemctl enable plasma-login-manager.service \
     && systemctl set-default graphical.target
 
 # Basic image invariants: fail the build here rather than publishing an image
@@ -48,4 +48,4 @@ RUN test -x /usr/bin/bootc \
     && test -x /usr/bin/ostree \
     && test -x /usr/bin/rum \
     && test -e /usr/lib/systemd/system/ostree-finalize-staged.service \
-    && test -e /usr/lib/systemd/system/sddm.service
+    && test -e /usr/lib/systemd/system/plasma-login-manager.service
