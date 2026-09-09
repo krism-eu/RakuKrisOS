@@ -35,10 +35,12 @@ RUN dnf5 -y --setopt=install_weak_deps=False install \
 
 COPY config/rum.conf /etc/rum/rum.conf
 
-# RakuOS overlay code assumes these image-side seeds exist. Full RakuOS creates
-# them elsewhere in its image pipeline; starting from Fedora Minimal means we
-# must create them explicitly or first-boot overlay paths can silently no-op.
-# Keep the default native app set tiny; RUM owns these packages, not the base.
+# Full RakuOS seeds a factory application set. RakuKrisOS deliberately does
+# not: a daily-driver boot must never depend on network availability, repo
+# health, or a successful RUM transaction before the display manager starts.
+# An empty packages.list makes upstream rakuos-overlay-sync exit immediately,
+# while the persistent /usr overlay remains available for explicit RUM installs
+# after login.
 RUN set -eux; \
     install -d -m 0755 /usr/share/rakuos /usr/share/factory/var/lib/rakuos; \
     printf '%s\n' plasma > /usr/share/rakuos/de-name; \
@@ -46,14 +48,12 @@ RUN set -eux; \
       bootc ostree rakuos-core rakuos-rum rum-dnf-shim \
       plasma-workspace plasma-desktop kwin plasma-login-manager \
       > /usr/share/rakuos/protected-packages.txt; \
-    printf '%s\n' dolphin konsole kate \
-      > /usr/share/factory/var/lib/rakuos/packages.list; \
+    : > /usr/share/factory/var/lib/rakuos/packages.list; \
     /usr/libexec/rakuos/generate-base-manifest; \
     test -s /usr/share/rakuos/base-manifest.txt
 
-# Keep Fedora stock kernel + SELinux userspace for now. SELinux is removed only
-# together with a tested no-SELinux OSTree/AppArmor path; doing it earlier can
-# break ostree-finalize-staged and make a bootc deployment fall back.
+# Keep Fedora stock kernel + SELinux userspace for the first deployment tests.
+# Security-stack changes come only after boot/update/rollback behavior is proven.
 
 # Fedora 44 Plasma Login Manager uses plasmalogin.service.
 RUN systemctl enable --force plasmalogin.service \
@@ -74,8 +74,8 @@ RUN set -eux; \
     test -e /usr/lib/systemd/system/rakuos-base-protect.service; \
     test -s /usr/share/rakuos/protected-packages.txt; \
     test -s /usr/share/rakuos/base-manifest.txt; \
-    test -s /usr/share/factory/var/lib/rakuos/packages.list; \
+    test -e /usr/share/factory/var/lib/rakuos/packages.list; \
+    test ! -s /usr/share/factory/var/lib/rakuos/packages.list; \
     test -d /usr/share/icons/breeze; \
     rpm -q glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it; \
-    rpm -q google-noto-sans-fonts google-noto-sans-mono-fonts google-noto-color-emoji-fonts; \
     ! rpm -q glibc-all-langpacks >/dev/null 2>&1
