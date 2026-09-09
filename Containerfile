@@ -106,8 +106,19 @@ RUN set -eux; \
 # rakuos-core's RPM %post may generate an initramfs under /boot. A bootc image
 # instead carries initramfs next to the kernel under /usr/lib/modules/$kver.
 # Rebuild after replacing the overlay binary and fail if the module/binary are
-# not really present in the initramfs. Remove legacy /boot initramfs files.
+# not really present in the initramfs. Fedora bootc intentionally has
+# /root -> /var/roothome; that target is absent at image-build time and dracut
+# otherwise fails trying to copy /root. Temporarily materialize /root only for
+# dracut, then restore the bootc symlink exactly as it was.
 RUN set -eux; \
+    root_was_symlink=0; \
+    root_target=''; \
+    if [ -L /root ]; then \
+      root_was_symlink=1; \
+      root_target="$(readlink /root)"; \
+      rm -f /root; \
+      install -d -m 0700 /root; \
+    fi; \
     found_kernel=0; \
     for moddir in /usr/lib/modules/*; do \
       [ -d "$moddir" ] || continue; \
@@ -119,6 +130,10 @@ RUN set -eux; \
       lsinitrd "$moddir/initramfs.img" | grep -q '90rakuos-overlay'; \
     done; \
     [ "$found_kernel" -eq 1 ]; \
+    if [ "$root_was_symlink" -eq 1 ]; then \
+      rm -rf /root; \
+      ln -s "$root_target" /root; \
+    fi; \
     rm -f /boot/initramfs-*.img; \
     test -z "$(find /boot -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null)"
 
@@ -147,6 +162,7 @@ RUN set -eux; \
     test -e /usr/share/factory/var/lib/rakuos/packages.list; \
     test ! -s /usr/share/factory/var/lib/rakuos/packages.list; \
     test ! -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \
+    test -L /root; \
     rpm -q glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it; \
     ! rpm -q glibc-all-langpacks >/dev/null 2>&1; \
     bootc container lint
