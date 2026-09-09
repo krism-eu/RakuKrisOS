@@ -17,12 +17,42 @@ crates/systems/src/bin/base_protect.rs
 crates/systems/src/bin/generate_base_manifest.rs
 
 # Overlay synchronization around graphical login
-# Keep initially; remove only if testing proves the initrd/RUM split no longer needs it.
 data/systemd/system/rakuos-overlay-sync.service
 data/systemd/system/display-manager.service.d/rakuos-overlay-sync.conf
+data/systemd/system/rakuos-base-protect.service
 
-# Flatpak itself remains supported by RakuKrisOS, but Flatpak-specific RakuOS
-# repair/watcher logic is optional and is not part of the first slim core.
+[runtime-seeds]
+# These are not optional when building from Fedora bootc Minimal. Full RakuOS
+# creates them in other image-generation stages, but rakuos-core itself assumes
+# they already exist.
+/usr/share/rakuos/de-name
+/usr/share/rakuos/protected-packages.txt
+/usr/share/rakuos/base-manifest.txt
+/usr/share/factory/var/lib/rakuos/packages.list
+
+# Persistent state created/used by the overlay implementation.
+/var/lib/rakuos
+/var/lib/rakuos/overlay/upper
+/var/lib/rakuos/overlay/work
+/var/lib/rakuos/rum-rpmdb
+/var/cache/rum
+
+# The initrd code creates the mutable /var paths as needed, but the factory seed
+# under /usr/share/factory must be present in the image or factory_restore()
+# returns without seeding a first boot/reset.
+
+[patch-before-slim-build]
+# sync.rs still contains legacy optional integration calls that become dangling
+# references after we drop the related scripts. Remove these branches entirely
+# rather than leaving best-effort calls to binaries that do not exist:
+crates/overlay/src/bin/sync.rs -> maybe_setup_ollama
+crates/overlay/src/bin/sync.rs -> restore_sudo_pref
+crates/overlay/src/bin/sync.rs -> restore_uutils_pref
+
+# Once those consumers are removed, stop preserving these obsolete markers in
+# overlay_mount.rs/reset handling as well:
+/var/lib/rakuos/user-sudo
+/var/lib/rakuos/user-uutils
 
 [drop]
 # Legacy RakuOS package-management wrappers: RUM is the package manager.
@@ -50,7 +80,6 @@ data/systemd/system/rakuos-flatpak-watcher.service
 data/systemd/user/rakuos-user.service
 
 # Gaming / NVIDIA / hardware-specific / AI
-# Explicitly excluded from RakuKrisOS v1.
 data/scripts/setup-g733zm-audio
 data/scripts/setup-gaming
 data/scripts/setup-nvidia
@@ -59,8 +88,8 @@ data/scripts/setup-lsfg-vk
 data/scripts/setup-ollama
 data/scripts/setup-virtualization
 
-# Kernel signing / TPM helpers are not part of v1 because the first release
-# uses Fedora's stock kernel. Secure Boot will be tested separately.
+# Kernel signing / TPM helpers are not part of v1 because Fedora stock kernel
+# is used and Secure Boot is tested separately.
 data/scripts/enroll-secureboot-key
 data/scripts/reenroll-tpm2
 data/scripts/rakuos-sign-modules
@@ -92,18 +121,17 @@ data/systemd/system/rpm-ostree-clean-deployments.timer
 data/systemd/system/rpm-ostree-clean-metadata.service
 data/systemd/system/rpm-ostree-clean-metadata.timer
 
-# RakuOS automatic bootc policy is excluded initially. RakuKrisOS will use
-# direct bootc switch/upgrade while deployment/fallback behavior is validated.
+# RakuOS automatic bootc policy is excluded initially. RakuKrisOS uses direct
+# bootc switch/upgrade while deployment/fallback behavior is validated.
 data/systemd/system/rakuos-bootc-switch.service
 data/systemd/system/rakuos-bootc-upgrade.service
 
 [review]
-# Upstream marks overlay-update deprecated and does not package it. Keep source
-# only as reference; do not install it.
+# Upstream marks overlay-update deprecated and does not package it.
 crates/overlay/src/bin/update.rs
 
-# Revisit only if RUM requires any of these at runtime after the slim package
-# is built. Do not add them pre-emptively.
+# RUM itself remains. jq/dnf5 are not pre-emptively added to slim-core runtime;
+# exact dependencies will follow the extracted binaries, not the old monolith.
 flatpak
 jq
 dnf5
