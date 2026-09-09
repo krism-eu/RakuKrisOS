@@ -1,0 +1,8 @@
+# Fedora 44 Minimal + bootc base requirements
+bootc
+bootupd
+composefs
+composefs-libs
+dracut
+ostree
+systemd
