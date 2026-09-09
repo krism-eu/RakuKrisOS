@@ -36,9 +36,6 @@ jobs:
       - name: Install Buildah
         run: |
           set -euxo pipefail
-          # GitHub's Ubuntu image can carry third-party apt sources. They are
-          # irrelevant to this build and a transient bad index (e.g. Chrome)
-          # must not prevent Buildah from being installed from Ubuntu itself.
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
@@ -69,8 +66,7 @@ jobs:
             plasma-workspace plasma-desktop kwin \
             plasma-login-manager kcm-plasmalogin kde-settings-plasmalogin \
             pipewire-pulseaudio \
-            glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it \
-            google-noto-sans-fonts google-noto-sans-mono-fonts google-noto-color-emoji-fonts
+            glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it
 
           sudo buildah run rakukrisos-validation -- sh -euxc '
             test -x /usr/bin/rum
@@ -97,7 +93,6 @@ jobs:
             ! rpm -q glibc-all-langpacks >/dev/null 2>&1
           '
 
-          # bootc lint is a deployment-oriented validation, not just an RPM check.
           sudo buildah run rakukrisos-validation -- bootc container lint
           sudo buildah rm rakukrisos-validation
 
