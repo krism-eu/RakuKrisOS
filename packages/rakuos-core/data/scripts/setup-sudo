@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# setup-sudo — Select the privilege escalation tool used system-wide.
+# Manages both /usr/bin/sudo and /usr/bin/su via `alternatives`.
+# Supported tools: sudo-rs (default on RakuOS), doas, run0
+set -euo pipefail
+
+TOOL="${1:-}"
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+die()  { echo "Error: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+
+need_root() {
+    [[ $EUID -eq 0 ]] || die "This command must be run as root (use sudo or pkexec)."
+}
+
+current_target() {
+    local link="$1"
+    readlink -f "$link" 2>/dev/null || echo "unknown"
+}
+
+register_alt() {
+    local link="$1" name="$2" path="$3" priority="$4"
+    alternatives --install "$link" "$name" "$path" "$priority" 2>/dev/null || true
+    alternatives --set "$name" "$path"
+}
+
+usage() {
+    echo "RakuOS privilege escalation switcher"
+    echo ""
+    echo "Usage:  rakuos setup-sudo <tool>"
+    echo ""
+    echo "Tools:"
+    echo "  sudo-rs   sudo + su reimplemented in Rust (RakuOS default)"
+    echo "  sudo      traditional sudo (shadow-utils)"
+    echo "  doas      OpenBSD doas — simple, minimal config"
+    echo "  run0      systemd run0 — no setuid, polkit-based"
+    echo ""
+    echo "Current /usr/bin/sudo → $(current_target /usr/bin/sudo)"
+    echo "Current /usr/bin/su   → $(current_target /usr/bin/su)"
+    echo ""
+    alternatives --display sudo 2>/dev/null || true
+    alternatives --display su   2>/dev/null || true
+}
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
+
+setup_sudo_rs() {
+    need_root
+    local sudo_bin su_bin
+
+    if [[ -f /usr/bin/sudo-rs ]]; then
+        sudo_bin=/usr/bin/sudo-rs
+    else
+        info "sudo-rs not installed — installing via rakuos..."
+        /usr/libexec/rakuos/rakuos-install sudo-rs
+        sudo_bin=$(command -v sudo-rs 2>/dev/null) || die "sudo-rs binary not found after install."
+    fi
+
+    if [[ -f /usr/bin/su-rs ]]; then
+        su_bin=/usr/bin/su-rs
+    else
+        su_bin=/usr/bin/gnu_su
+    fi
+
+    local visudo_bin=/usr/bin/visudo-rs
+    [[ -f "$visudo_bin" ]] || visudo_bin=/usr/bin/gnu_visudo
+
+    register_alt /usr/bin/sudo   sudo   "$sudo_bin"   60
+    register_alt /usr/bin/su     su     "$su_bin"     60
+    register_alt /usr/bin/visudo visudo "$visudo_bin" 60
+
+    mkdir -p /var/lib/rakuos
+    echo "sudo-rs" > /var/lib/rakuos/user-sudo
+    info "sudo   → sudo-rs (${sudo_bin})"
+    info "su     → sudo-rs su (${su_bin})"
+    info "visudo → ${visudo_bin}"
+    info "Edit /etc/sudoers.d/ to configure permissions."
+}
+
+setup_doas() {
+    need_root
+
+    if ! command -v doas &>/dev/null; then
+        info "doas not installed — installing via rakuos..."
+        /usr/libexec/rakuos/rakuos-install doas
+    fi
+
+    local doas_bin
+    doas_bin=$(command -v doas)
+
+    if [[ ! -f /etc/doas.conf ]]; then
+        info "Creating /etc/doas.conf with default wheel group rule..."
+        cat > /etc/doas.conf << 'EOF'
+# /etc/doas.conf — see doas.conf(5)
+# Allow members of the wheel group to escalate (with password caching)
+permit persist :wheel
+EOF
+        chmod 600 /etc/doas.conf
+        chown root:root /etc/doas.conf
+    fi
+
+    # sudo → doas wrapper (translates common sudo flags)
+    cat > /usr/local/bin/sudo-doas << 'WRAPPER'
+#!/usr/bin/env bash
+args=()
+skip_next=false
+for arg in "$@"; do
+    $skip_next && { skip_next=false; continue; }
+    case "$arg" in
+        -E)        ;;
+        -n)        args+=(-n) ;;
+        -u)        args+=(-u); skip_next=true ;;
+        --user=*)  args+=(-u "${arg#--user=}") ;;
+        --)        break ;;
+        *)         args+=("$arg") ;;
+    esac
+done
+exec doas "${args[@]}"
+WRAPPER
+    chown root:root /usr/local/bin/sudo-doas
+    chmod 755 /usr/local/bin/sudo-doas
+
+    # su → doas wrapper (opens a root shell or shell as named user)
+    cat > /usr/local/bin/su-doas << 'WRAPPER'
+#!/usr/bin/env bash
+user="${1:-root}"
+shift 2>/dev/null || true
+if [[ $# -gt 0 ]]; then
+    exec doas -u "$user" -- "$@"
+else
+    exec doas -u "$user" -- "${SHELL:-/bin/bash}" -l
+fi
+WRAPPER
+    chown root:root /usr/local/bin/su-doas
+    chmod 755 /usr/local/bin/su-doas
+
+    register_alt /usr/bin/sudo   sudo   /usr/local/bin/sudo-doas 50
+    register_alt /usr/bin/su     su     /usr/local/bin/su-doas   50
+    register_alt /usr/bin/visudo visudo /usr/bin/gnu_visudo       50
+
+    mkdir -p /var/lib/rakuos
+    echo "doas" > /var/lib/rakuos/user-sudo
+    info "sudo   → doas wrapper"
+    info "su     → doas su wrapper"
+    info "visudo → /usr/bin/gnu_visudo"
+    info "Edit /etc/doas.conf to configure permissions."
+}
+
+setup_run0() {
+    need_root
+
+    local run0_bin
+    run0_bin=$(command -v run0 2>/dev/null) || die "run0 not found — requires systemd >= 256."
+
+    # sudo → run0 wrapper
+    cat > /usr/local/bin/sudo-run0 << 'WRAPPER'
+#!/usr/bin/env bash
+args=()
+run0_args=()
+skip_next=false
+user=""
+for arg in "$@"; do
+    $skip_next && { skip_next=false; user="$arg"; continue; }
+    case "$arg" in
+        -u)        skip_next=true ;;
+        --user=*)  user="${arg#--user=}" ;;
+        -n)        run0_args+=(--no-ask-password) ;;
+        -E|-H)     ;;
+        --)        break ;;
+        *)         args+=("$arg") ;;
+    esac
+done
+if [[ -n "$user" ]]; then
+    exec run0 --user="$user" "${run0_args[@]}" "${args[@]}"
+else
+    exec run0 "${run0_args[@]}" "${args[@]}"
+fi
+WRAPPER
+    chown root:root /usr/local/bin/sudo-run0
+    chmod 755 /usr/local/bin/sudo-run0
+
+    # su → run0 wrapper (opens a shell as root or named user)
+    cat > /usr/local/bin/su-run0 << 'WRAPPER'
+#!/usr/bin/env bash
+user="${1:-root}"
+shift 2>/dev/null || true
+if [[ $# -gt 0 ]]; then
+    exec run0 --user="$user" -- "$@"
+else
+    exec run0 --user="$user" -- "${SHELL:-/bin/bash}" -l
+fi
+WRAPPER
+    chown root:root /usr/local/bin/su-run0
+    chmod 755 /usr/local/bin/su-run0
+
+    register_alt /usr/bin/sudo   sudo   /usr/local/bin/sudo-run0 40
+    register_alt /usr/bin/su     su     /usr/local/bin/su-run0   40
+    register_alt /usr/bin/visudo visudo /usr/bin/gnu_visudo       40
+
+    mkdir -p /var/lib/rakuos
+    echo "run0" > /var/lib/rakuos/user-sudo
+    info "sudo   → run0 wrapper (no setuid required)"
+    info "su     → run0 su wrapper"
+    info "visudo → /usr/bin/gnu_visudo"
+    info "Polkit rules control what run0 permits — see /etc/polkit-1/rules.d/"
+}
+
+setup_sudo_og() {
+    need_root
+
+    local sudo_bin=/usr/bin/gnu_sudo
+    local su_bin=/usr/bin/gnu_su
+    local visudo_bin=/usr/bin/gnu_visudo
+
+    [[ -f "$sudo_bin" ]]   || die "Traditional sudo not found at $sudo_bin — was it preserved during image build?"
+    [[ -f "$su_bin" ]]     || die "Traditional su not found at $su_bin."
+    [[ -f "$visudo_bin" ]] || visudo_bin=/usr/bin/visudo-rs
+
+    register_alt /usr/bin/sudo   sudo   "$sudo_bin"   30
+    register_alt /usr/bin/su     su     "$su_bin"     30
+    register_alt /usr/bin/visudo visudo "$visudo_bin" 30
+
+    mkdir -p /var/lib/rakuos
+    echo "sudo" > /var/lib/rakuos/user-sudo
+    info "sudo   → traditional sudo (${sudo_bin})"
+    info "su     → traditional su (${su_bin})"
+    info "visudo → ${visudo_bin}"
+    info "Edit /etc/sudoers or /etc/sudoers.d/ to configure permissions."
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+case "$TOOL" in
+    sudo-rs)  setup_sudo_rs ;;
+    sudo)     setup_sudo_og ;;
+    doas)     setup_doas    ;;
+    run0)     setup_run0    ;;
+    *)        usage; [[ -z "$TOOL" ]] && exit 0 || exit 1 ;;
+esac

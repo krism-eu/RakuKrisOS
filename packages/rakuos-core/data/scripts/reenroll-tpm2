@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Re-enroll TPM2 auto-unlock for all LUKS partitions on the system.
+# Use this after a firmware update causes TPM2 auto-unlock to stop working.
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Error: this command must be run as root (use sudo or run0)."
+    exit 1
+fi
+
+# ── Check TPM2 is present ─────────────────────────────────────────────────────
+if [[ -z "$(ls /sys/class/tpm/ 2>/dev/null)" ]]; then
+    echo "Error: no TPM2 device found. Cannot enroll TPM2 auto-unlock."
+    exit 1
+fi
+
+# ── Find all LUKS partitions on the system ────────────────────────────────────
+declare -A luks_seen=()
+luks_partitions=()
+
+# Collect from /etc/crypttab
+if [[ -f /etc/crypttab ]]; then
+    while IFS=' ' read -r name dev _rest; do
+        [[ "$name" =~ ^# ]] && continue
+        [[ -z "$name" || -z "$dev" ]] && continue
+        if [[ "$dev" == UUID=* ]]; then
+            uuid="${dev#UUID=}"
+            dev=$(blkid -U "$uuid" 2>/dev/null || true)
+        fi
+        [[ -b "$dev" ]] || continue
+        dev=$(realpath "$dev")
+        [[ -n "${luks_seen[$dev]:-}" ]] && continue
+        cryptsetup isLuks "$dev" 2>/dev/null || continue
+        luks_seen["$dev"]=1
+        luks_partitions+=("$dev")
+    done < /etc/crypttab
+fi
+
+# Collect all block partitions — catches secondary encrypted disks not in crypttab
+while IFS= read -r dev; do
+    dev=$(realpath "$dev" 2>/dev/null || echo "$dev")
+    [[ -n "${luks_seen[$dev]:-}" ]] && continue
+    cryptsetup isLuks "$dev" 2>/dev/null || continue
+    luks_seen["$dev"]=1
+    luks_partitions+=("$dev")
+done < <(lsblk -lno NAME,TYPE | awk '$2=="part"{print "/dev/"$1}')
+
+if [[ ${#luks_partitions[@]} -eq 0 ]]; then
+    echo "No LUKS partitions found on this system."
+    exit 1
+fi
+
+echo "Found ${#luks_partitions[@]} LUKS partition(s):"
+for dev in "${luks_partitions[@]}"; do
+    uuid=$(cryptsetup luksUUID "$dev" 2>/dev/null || echo "unknown")
+    echo "  $dev  (UUID: $uuid)"
+done
+echo ""
+
+# ── Re-enroll each partition ──────────────────────────────────────────────────
+_wipe_and_enroll() {
+    local partition="$1"
+    local keyfile="$2"
+
+    echo "--- $partition ---"
+
+    # Verify passphrase unlocks this partition
+    if ! cryptsetup open --test-passphrase --key-file="$keyfile" "$partition" 2>/dev/null; then
+        echo "  Skipping — passphrase does not unlock this partition."
+        return 0
+    fi
+
+    echo "  Removing existing TPM2 tokens..."
+    systemd-cryptenroll --wipe-slot=tpm2 "$partition" 2>/dev/null || true
+
+    echo "  Enrolling TPM2 (PCR 7 — Secure Boot state)..."
+    if systemd-cryptenroll \
+        --tpm2-device=auto \
+        --tpm2-pcrs=7 \
+        --unlock-key-file="$keyfile" \
+        "$partition"; then
+        echo "  ✓ Enrolled successfully."
+    else
+        echo "  ✗ Enrollment failed for $partition."
+    fi
+    echo ""
+}
+
+# For each unique passphrase entered, try it against all remaining partitions.
+# This handles the common case where root and secondary disk use the same
+# passphrase, but also lets the user enter different passphrases per disk.
+declare -A enrolled=()
+remaining=("${luks_partitions[@]}")
+
+while [[ ${#remaining[@]} -gt 0 ]]; do
+    echo "Enter passphrase for: ${remaining[*]}"
+    echo "(If multiple disks share a passphrase, it will be applied to all that match.)"
+    echo ""
+    read -r -s -p "Passphrase: " PASSPHRASE
+    echo ""
+    [[ -z "$PASSPHRASE" ]] && echo "Passphrase cannot be empty." && continue
+
+    TMPKEY=$(mktemp)
+    trap 'rm -f "$TMPKEY"' EXIT
+    printf '%s' "$PASSPHRASE" > "$TMPKEY"
+
+    next_remaining=()
+    for dev in "${remaining[@]}"; do
+        if cryptsetup open --test-passphrase --key-file="$TMPKEY" "$dev" 2>/dev/null; then
+            _wipe_and_enroll "$dev" "$TMPKEY"
+            enrolled["$dev"]=1
+        else
+            next_remaining+=("$dev")
+        fi
+    done
+
+    if [[ ${#next_remaining[@]} -eq ${#remaining[@]} ]]; then
+        echo "Passphrase did not match any remaining partition."
+        echo ""
+    fi
+
+    remaining=("${next_remaining[@]}")
+
+    if [[ ${#remaining[@]} -gt 0 ]]; then
+        echo "${#remaining[@]} partition(s) still need a passphrase: ${remaining[*]}"
+        read -r -p "Enter another passphrase for remaining disks? [Y/n] " yn
+        echo ""
+        [[ "${yn,,}" == "n" ]] && break
+    fi
+done
+
+if [[ ${#enrolled[@]} -gt 0 ]]; then
+    echo "TPM2 auto-unlock enrolled for ${#enrolled[@]} partition(s)."
+    echo "Reboot to verify disks unlock automatically."
+fi
+
+if [[ ${#remaining[@]} -gt 0 ]]; then
+    echo "Warning: ${#remaining[@]} partition(s) were not enrolled: ${remaining[*]}"
+fi

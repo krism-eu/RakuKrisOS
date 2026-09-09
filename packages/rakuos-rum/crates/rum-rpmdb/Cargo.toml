@@ -1,0 +1,10 @@
+[package]
+name = "rum-rpmdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rum-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

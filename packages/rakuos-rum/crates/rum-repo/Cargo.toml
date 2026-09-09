@@ -1,0 +1,24 @@
+[package]
+name = "rum-repo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rum-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+quick-xml.workspace = true
+serde_yaml.workspace = true
+flate2.workspace = true
+xz2.workspace = true
+zstd.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+rum-librepo.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+md-5.workspace = true
+hex.workspace = true

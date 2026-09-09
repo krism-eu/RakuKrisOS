@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SB_CERT="/usr/share/rakuos/sb_pubkey.der"
+MOK_DIR="/var/lib/rakuos-user-MOK"
+MOK_KEY="${MOK_DIR}/mok.key"
+MOK_PEM="${MOK_DIR}/mok.pem"
+MOK_DER="${MOK_DIR}/mok.der"
+ENROLLMENT_PASSWORD="rakuos"
+
+if [[ $EUID -ne 0 ]]; then
+    exec sudo-rs "$0" "$@"
+fi
+
+if [[ ! -d /sys/firmware/efi ]]; then
+    echo "This system is not booted in EFI mode. Secure Boot enrollment is not supported."
+    exit 1
+fi
+
+if [[ ! -f "$SB_CERT" ]]; then
+    echo "RakuOS Secure Boot key not found at $SB_CERT."
+    echo "Your installation may be outdated. Run: rakuos system-upgrade"
+    exit 1
+fi
+
+# Generate per-machine module signing key if any file is missing
+if [[ ! -f "$MOK_KEY" ]] || [[ ! -f "$MOK_PEM" ]] || [[ ! -f "$MOK_DER" ]]; then
+    echo "Generating unique per-machine module signing key..."
+    mkdir -p "$MOK_DIR"
+    openssl req -new -x509 -newkey rsa:2048 \
+        -keyout "$MOK_KEY" -out "$MOK_PEM" \
+        -days 3650 -nodes \
+        -subj "/CN=RakuOS Machine Module Signing Key/"
+    chmod 600 "$MOK_KEY"
+    openssl x509 -in "$MOK_PEM" -outform DER -out "$MOK_DER"
+    echo "Per-machine module signing key generated."
+fi
+
+# Set MokManager timeout to -1 so it waits indefinitely for user input
+mokutil --timeout -1 || true
+
+enroll_cert() {
+    local cert="$1"
+    local label="$2"
+
+    if ! [[ -f "$cert" ]]; then
+        echo "SKIP: ${label} — file not found at ${cert}"
+        return 0
+    fi
+
+    # Check if already enrolled in the running system
+    if LC_ALL=C mokutil -t "$cert" 2>/dev/null | grep -q "is already enrolled"; then
+        echo "SKIP: ${label} is already enrolled."
+        return 0
+    fi
+
+    # Check if already queued for next reboot
+    if LC_ALL=C mokutil -t "$cert" 2>/dev/null | grep -q "is already in the enrollment request"; then
+        echo "SKIP: ${label} is already queued for enrollment."
+        return 0
+    fi
+
+    echo "Enrolling ${label}..."
+    printf '%s\n%s\n' "$ENROLLMENT_PASSWORD" "$ENROLLMENT_PASSWORD" \
+        | mokutil --import "$cert"
+    echo "Queued: ${label}"
+}
+
+enroll_cert "$SB_CERT" "RakuOS Secure Boot key"
+enroll_cert "$MOK_DER" "RakuOS machine module signing key"
+
+echo ""
+echo "Secure Boot key enrollment queued successfully."
+echo ""
+echo "On your next reboot:"
+echo "  1. A blue 'MOK Manager' screen will appear"
+echo "  2. Select 'Enroll MOK' then 'Continue'"
+echo "  3. Enter the password: ${ENROLLMENT_PASSWORD}"
+echo "  4. Select 'Reboot'"

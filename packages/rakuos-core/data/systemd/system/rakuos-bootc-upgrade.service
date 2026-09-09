@@ -1,0 +1,14 @@
+[Unit]
+Description=RakuOS bootc image upgrade
+Documentation=https://rakuos.org
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bootc upgrade
+ExecStartPost=/usr/bin/fc-cache -f
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rakuos-bootc-upgrade

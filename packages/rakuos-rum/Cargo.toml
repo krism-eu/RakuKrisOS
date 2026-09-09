@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rum-core",
+    "crates/rum-rpmdb",
+    "crates/rum-overlay",
+    "crates/rum-repo",
+    "crates/rum-resolver",
+    "crates/rum-solv",
+    "crates/rum-librepo",
+    "crates/rum-transaction",
+    "crates/rum-cli",
+    "crates/rum-dnf-shim",
+    "crates/rum-zypper-shim",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://gitlab.com/rakuos/packages/rakuos/rakuos-rum"
+
+[workspace.dependencies]
+rum-core = { path = "crates/rum-core" }
+rum-rpmdb = { path = "crates/rum-rpmdb" }
+rum-overlay = { path = "crates/rum-overlay" }
+rum-repo = { path = "crates/rum-repo" }
+rum-resolver = { path = "crates/rum-resolver" }
+rum-solv = { path = "crates/rum-solv" }
+rum-librepo = { path = "crates/rum-librepo" }
+rum-transaction = { path = "crates/rum-transaction" }
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "sync"] }
+# hickory-dns: the default resolver shells out to the OS's blocking
+# getaddrinfo() via a threadpool with *no* timeout anywhere in reqwest's
+# stack — reqwest's own connect_timeout only wraps the TCP connect phase
+# that happens *after* resolution completes (confirmed by reading
+# hyper-util's HttpConnector::call_async: resolve() runs unwrapped, then
+# ConnectingTcp::new(addrs, config.connect_timeout) is built from the
+# already-resolved addrs). A hung or slow-to-answer resolver (flaky
+# systemd-resolved stub, broken nsswitch, dead nameserver) can stall
+# indefinitely before any of rum's timeout/retry logic even starts
+# counting. hickory-dns replaces it with a pure-Rust async resolver that
+# has its own bounded per-query timeout/retry, closing that gap.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "hickory-dns"] }
+quick-xml = { version = "0.36", features = ["serialize"] }
+serde_yaml = "0.9"
+flate2 = "1"
+xz2 = "0.1"
+zstd = "0.13"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+indicatif = "0.17"
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+[profile.release]
+lto = true
+strip = true

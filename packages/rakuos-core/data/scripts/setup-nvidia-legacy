@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -ouex pipefail
+
+# Install NVIDIA legacy stack
+rum -y install --exclude=libnvidia-cfg \
+    --exclude=libnvidia-gpucomp \
+    --exclude=nvidia-driver-cuda-libs \
+    --exclude=libnvidia-ml \
+    dkms-nvidia-580xx \
+    nvidia-modprobe-580xx \
+    nvidia-driver-580xx \
+    nvidia-driver-580xx-cuda \
+    nvidia-settings-580xx \
+    nvidia-persistenced-580xx \
+    libva-nvidia-driver
+
+bootc loader-entries set-options-for-source \
+    --source rakuos-user \
+    --options "rd.driver.blacklist=nouveau modprobe.blacklist=nouveau"
+echo "Nvidia setup complete please reboot to apply changes."

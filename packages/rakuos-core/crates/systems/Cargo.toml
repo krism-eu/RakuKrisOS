@@ -1,0 +1,39 @@
+[package]
+name = "rakuos-systems"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rakuos-system-setup"
+path = "src/bin/system_setup.rs"
+
+[[bin]]
+name = "rakuos-flatpak-wrapper-gen"
+path = "src/bin/flatpak_wrapper_gen.rs"
+
+[[bin]]
+name = "rakuos-flatpak-event-watcher"
+path = "src/bin/flatpak_event_watcher.rs"
+
+[[bin]]
+name = "rakuos"
+path = "src/bin/rakuos.rs"
+
+[[bin]]
+name = "rakuos-base-protect"
+path = "src/bin/base_protect.rs"
+
+[[bin]]
+name = "rakuos-user"
+path = "src/bin/user.rs"
+
+[[bin]]
+name = "rakuos-generate-base-manifest"
+path = "src/bin/generate_base_manifest.rs"
+
+[dependencies]
+rakuos-overlay = { path = "../overlay" }
+anyhow = "1"
+inotify = "0.10"
+walkdir = "2"
+libc = "0.2"

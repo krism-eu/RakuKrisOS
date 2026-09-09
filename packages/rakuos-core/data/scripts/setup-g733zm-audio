@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONF=/etc/modprobe.d/hda-jack-retask.conf
+FW=/usr/lib/firmware/hda-jack-retask.fw
+
+if [[ ! -f "$FW" ]]; then
+    echo "Error: $FW not found — your image may be too old to include this fix."
+    exit 1
+fi
+
+if [[ -f "$CONF" ]]; then
+    echo "ASUS G733ZM audio fix is already applied ($CONF)."
+    exit 0
+fi
+
+echo "Applying ASUS G733ZM audio fix..."
+cat > "$CONF" <<'EOF'
+options snd-hda-intel patch=hda-jack-retask.fw,hda-jack-retask.fw,hda-jack-retask.fw,hda-jack-retask.fw
+EOF
+
+echo ""
+echo "Done. Reboot for the audio fix to take effect."

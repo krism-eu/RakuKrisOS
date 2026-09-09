@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -ouex pipefail
+
+# Install NVIDIA stack
+rum -y install \
+    dkms-nvidia \
+    nvidia-modprobe \
+    nvidia-driver \
+    nvidia-settings \
+    nvidia-driver-cuda \
+    nvidia-persistenced \
+    libva-nvidia-driver
+
+
+bootc loader-entries set-options-for-source \
+    --source rakuos-user \
+    --options "rd.driver.blacklist=nouveau modprobe.blacklist=nouveau"
+
+echo "Nvidia setup complete please reboot to apply changes."

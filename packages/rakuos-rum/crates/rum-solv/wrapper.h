@@ -1,0 +1,14 @@
+#include <solv/pool.h>
+#include <solv/poolarch.h>
+#include <solv/hash.h>
+#include <solv/repo.h>
+#include <solv/repo_solv.h>
+#include <solv/repo_write.h>
+#include <solv/repodata.h>
+#include <solv/solver.h>
+#include <solv/solverdebug.h>
+#include <solv/queue.h>
+#include <solv/transaction.h>
+#include <solv/evr.h>
+#include <solv/knownid.h>
+#include <solv/pool_parserpmrichdep.h>

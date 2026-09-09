@@ -1,0 +1,43 @@
+#!/bin/bash
+# Sign akmod-generated kernel modules with the per-machine RakuOS MOK key.
+# Invoked by the akmods@.service drop-in after each akmod build completes.
+# Inspired by https://gist.github.com/xenithorb/df08970b9e70bb3c6576e1fd91460afe
+
+set -eu
+
+LOG() { echo "${0##*/}: $*" >&2; }
+DIE() { LOG "ERROR: $*"; exit 1; }
+
+[[ -z ${1:-} ]] && DIE "usage: $0 <kernel_version>"
+
+KERNEL_VER=$1
+: ${MOK_KEY:=/var/lib/rakuos-user-MOK/mok.key}
+: ${MOK_CRT:=/var/lib/rakuos-user-MOK/mok.der}
+: ${MOK_HASH:=sha256}
+: ${SIGN:=/usr/src/kernels/${KERNEL_VER}/scripts/sign-file}
+: ${KMOD_RPM_DIR:=/var/cache/akmods}
+
+if [[ ! -f "$MOK_KEY" || ! -f "$MOK_CRT" ]]; then
+    LOG "per-machine MOK key not found — skipping signing."
+    exit 0
+fi
+[[ ! -x "$SIGN" ]] && DIE "sign-file not found at $SIGN"
+
+LOG "Signing akmod-generated modules for kernel version $KERNEL_VER"
+
+readarray -t kmods < <(
+    find "${KMOD_RPM_DIR}" -name "*${KERNEL_VER}*.rpm" |
+        xargs rpm -qlp |
+        grep '\.ko$'
+)
+
+LOG "Found ${#kmods[*]} modules"
+
+for kmod in "${kmods[@]}"; do
+    if [[ ! -f "$kmod" ]]; then
+        LOG "skipping $kmod (no such module)"
+        continue
+    fi
+    LOG "Signing $kmod"
+    "$SIGN" "$MOK_HASH" "$MOK_KEY" "$MOK_CRT" "$kmod"
+done

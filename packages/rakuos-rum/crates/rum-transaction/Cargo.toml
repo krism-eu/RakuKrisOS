@@ -1,0 +1,20 @@
+[package]
+name = "rum-transaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rum-core.workspace = true
+rum-overlay.workspace = true
+rum-repo.workspace = true
+rum-rpmdb.workspace = true
+rum-resolver.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indicatif.workspace = true
+libc.workspace = true

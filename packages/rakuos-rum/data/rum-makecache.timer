@@ -1,0 +1,11 @@
+[Unit]
+Description=rum makecache timer
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=1h
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

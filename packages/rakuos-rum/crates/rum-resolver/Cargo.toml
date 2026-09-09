@@ -1,0 +1,13 @@
+[package]
+name = "rum-resolver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rum-core.workspace = true
+rum-overlay.workspace = true
+rum-rpmdb.workspace = true
+rum-solv.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

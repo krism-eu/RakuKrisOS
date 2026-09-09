@@ -1,0 +1,301 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# rakuos-apparmor — build AppArmor userspace from upstream source (spec and
+# patches vendored in this repo, originally sourced from Terra/Fyra Labs) and
+# publish x86_64 + i686 (multilib companion) packages to the rakurpm repo.
+#
+# Fedora doesn't ship AppArmor at all. We build it ourselves — spec, preset,
+# and patches live in this repo (apparmor.spec, apparmor.preset, *.patch) —
+# so we control build flags and can also produce the i686 apparmor-libs/-devel
+# companions nobody upstream publishes, needed so our custom systemd
+# (-Dapparmor=enabled) and 32-bit apps/games have a matching libapparmor on
+# both arches.
+#
+# Source0 in the spec points at the upstream GitLab release tarball
+# (gitlab.com/apparmor/apparmor); `spectool -g` fetches it at build time.
+#
+# i686 is skipped entirely on rakuos-el-10 — EL9+ dropped 32-bit multilib,
+# there is nothing to cross-build there.
+#
+# ▶ REQUIRED CI/CD VARIABLES (Settings → CI/CD → Variables):
+#     RAKURPM_IP             — rakurpm server direct IP                (Masked + Protected)
+#     RAKURPM_ADMIN_PREFIX   — admin path the upload API is under      (default /backend)
+#     RAKURPM_TOKEN          — app upload bearer token                 (Masked + Protected)
+# ─────────────────────────────────────────────────────────────────────────────
+
+stages: [build, sync]
+
+build:rpm:
+  stage: build
+  image: $BUILD_IMAGE
+  tags: [saas-linux-2xlarge-amd64]
+  interruptible: true
+  timeout: 2 hours
+  parallel:
+    matrix:
+      - { TARGET: rakuos-44,      BUILD_IMAGE: "registry.fedoraproject.org/fedora:44",      TARGET_REPO: "rakuos-44",      KOJI_TAG: "f44-build", RAKUOS_RELEASEVER: "44",      DELAY_SECONDS: "0" }
+      - { TARGET: rakuos-el-10,   BUILD_IMAGE: "quay.io/centos/centos:stream10",            TARGET_REPO: "rakuos-el-10",   KOJI_TAG: "",          RAKUOS_RELEASEVER: "",        DELAY_SECONDS: "120" }
+
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - "**/*"
+        - "!*.md"
+        - "!.gitlab-ci.yml"
+
+  before_script:
+    - |
+      set -euo pipefail
+      if [ "${DELAY_SECONDS:-0}" -gt 0 ]; then
+        echo "== Stagger delay: sleeping ${DELAY_SECONDS}s =="
+        sleep "$DELAY_SECONDS"
+      fi
+
+      case "$TARGET" in
+        rakuos-el-10)
+          echo "== EL10 repo setup (CRB + EPEL) =="
+          dnf -y install epel-release >/dev/null 2>&1 || true
+          dnf config-manager --set-enabled crb >/dev/null 2>&1 || true
+          ;;
+      esac
+
+      echo "== Installing build tooling =="
+      dnf -y install rpm-build rpmdevtools dnf-plugins-core git curl jq diffutils cpio tar zstd >/dev/null
+      dnf -y install dnf5-plugins >/dev/null 2>&1 || true   # `dnf builddep` plugin on dnf5; harmless if absent
+      if [ "$TARGET" != "rakuos-el-10" ]; then
+        dnf -y install mock mock-core-configs >/dev/null
+      fi
+
+      echo "== Adding RakuOS repo =="
+      rpm --import https://repo.rakuos.org/pubkey.gpg 2>/dev/null || true
+      case "$TARGET" in
+        rakuos-el-10)
+          dnf -y config-manager addrepo --from-repofile=https://repo.rakuos.org/rakuos-el.repo 2>/dev/null || \
+            dnf -y config-manager --add-repo https://repo.rakuos.org/rakuos-el.repo
+          ;;
+        *)
+          dnf5 -y config-manager addrepo --id=rakuos \
+            --set=baseurl="https://repo.rakuos.org/rakuos/${RAKUOS_RELEASEVER}/" \
+            --set=gpgcheck=1 --set=gpgkey=https://repo.rakuos.org/pubkey.gpg 2>/dev/null || \
+            dnf -y config-manager --add-repo "https://repo.rakuos.org/rakuos/${RAKUOS_RELEASEVER}/"
+          ;;
+      esac
+
+  script:
+    - |
+      set -euo pipefail
+      : "${RAKURPM_TOKEN:?set RAKURPM_TOKEN in CI/CD variables}"
+      : "${RAKURPM_IP:?set RAKURPM_IP in CI/CD variables}"
+      ADMIN="${RAKURPM_ADMIN_PREFIX:-/backend}"
+
+      TOPDIR="$CI_PROJECT_DIR/rpmbuild"
+      mkdir -p "$TOPDIR"/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
+
+      # ── 1. Stage the spec, preset, and patches vendored in this repo ─────────
+      echo "== Staging spec + sources =="
+      cp "$CI_PROJECT_DIR/apparmor.spec"        "$TOPDIR/SPECS/"
+      cp "$CI_PROJECT_DIR/apparmor-libs32.spec" "$TOPDIR/SPECS/"
+      cp "$CI_PROJECT_DIR/apparmor.preset"      "$TOPDIR/SOURCES/"
+      cp "$CI_PROJECT_DIR"/*.patch              "$TOPDIR/SOURCES/"
+
+      # ── 2. Fetch Source0 (upstream release tarball) via spectool ─────────────
+      echo "== Fetching Source0 =="
+      spectool -g -C "$TOPDIR/SOURCES" --source 0 "$TOPDIR/SPECS/apparmor.spec"
+
+      # ── 3. Install BuildRequires and build for x86_64 ─────────────────────────
+      echo "== Installing BuildRequires =="
+      rpm -qa --qf '%{NAME}\n' | sort -u > /tmp/pre_builddep.txt
+      dnf -y builddep \
+        --define "_topdir $TOPDIR" \
+        --define "_sourcedir $TOPDIR/SOURCES" \
+        "$TOPDIR/SPECS/apparmor.spec" >/dev/null
+      rpm -qa --qf '%{NAME}\n' | sort -u > /tmp/post_builddep.txt
+      comm -13 /tmp/pre_builddep.txt /tmp/post_builddep.txt > /tmp/builddep_pkgs.txt
+      echo "== BuildRequires resolved to $(wc -l < /tmp/builddep_pkgs.txt) concrete package(s) =="
+
+      echo "== rpmbuild (x86_64) =="
+      rpmbuild -bb \
+        --define "_topdir $TOPDIR" \
+        --define "_sourcedir $TOPDIR/SOURCES" \
+        "$TOPDIR/SPECS/apparmor.spec" 2>&1 | tee "$CI_PROJECT_DIR/rpmbuild.log" || \
+      { tail -200 "$CI_PROJECT_DIR/rpmbuild.log" >&2; exit 1; }
+
+      # ── 4. Cross-build the i686 multilib companion via mock (skip on EL10) ──
+      # Built from apparmor-libs32.spec, NOT the full apparmor.spec: only
+      # libraries/libapparmor needs an i686 twin, and building the full spec
+      # for i686 drags in changehat/mod_apparmor, which needs apxs/httpd-devel
+      # that doesn't resolve cleanly for i686 (no 32-bit httpd) and kills the
+      # whole rpmbuild since %build is one shared script.
+      #
+      # Uses mock with target_arch=i686 against Koji's i686 buildroot repo
+      # (kojipkgs.fedoraproject.org/repos/<tag>/latest/i386/) rather than the
+      # public x86_64 release tree: Fedora dropped public i686 repos in F31+
+      # (see Changes/Noi686Repositories), so only Koji's internal buildroot
+      # compose still has real i686-native bash/coreutils/glibc etc. to
+      # bootstrap a target_arch=i686 chroot. That repo ships no comps/groups
+      # metadata, so chroot_setup_cmd installs the buildsys-build package set
+      # explicitly instead of via '@buildsys-build'. EL10 has no equivalent
+      # (no i686 multilib on EL9+), hence the skip.
+      if [ "$TARGET" != "rakuos-el-10" ]; then
+        echo "== Building i686 SRPM from apparmor-libs32.spec =="
+        rpmbuild -bs \
+          --define "_topdir $TOPDIR" \
+          --define "_sourcedir $TOPDIR/SOURCES" \
+          "$TOPDIR/SPECS/apparmor-libs32.spec" 2>&1 | tail -20
+        I686_SRPM=$(ls -t "$TOPDIR/SRPMS"/apparmor-*.src.rpm | head -1)
+        echo "== SRPM: $(basename "$I686_SRPM") =="
+
+        echo "== Writing mock config (target_arch=i686 using Koji's i686 buildroot repo) =="
+        RELEASEVER=$(rpm -E %fedora)
+        MOCK_CFG_NAME="rakuos-i686-${TARGET}"
+        cat <<EOF | sed 's/^      //' > "/etc/mock/${MOCK_CFG_NAME}.cfg"
+      config_opts['root'] = '${MOCK_CFG_NAME}'
+      config_opts['target_arch'] = 'i686'
+      config_opts['legal_host_arches'] = ('i686', 'x86_64')
+      config_opts['isolation'] = 'simple'
+      config_opts['use_bootstrap'] = False
+      config_opts['chroot_setup_cmd'] = 'install bash bzip2 coreutils cpio diffutils findutils gawk glibc-minimal-langpack grep gzip info patch redhat-rpm-config rpm-build sed shadow-utils tar unzip util-linux which xz perl-Pod-Checker gcc-c++ libstdc++-devel flex bison'
+      config_opts['dist'] = 'fc${RELEASEVER}'
+      config_opts['releasever'] = '${RELEASEVER}'
+      config_opts['package_manager'] = 'dnf'
+      config_opts['macros'] = {'%_pkgverify_level': 'none'}
+      config_opts['dnf_common_opts'] = ['--nogpgcheck']
+      config_opts['cleanup_on_success'] = False
+      config_opts['cleanup_on_failure'] = False
+      config_opts['dnf.conf'] = """
+      [main]
+      keepcache=1
+      debuglevel=2
+      reposdir=/dev/null
+      logfile=/var/log/yum.log
+      retries=20
+      obsoletes=1
+      gpgcheck=0
+      assumeyes=1
+      syslog_ident=mock
+      syslog_device=
+
+      [koji-i686-buildroot]
+      name=koji-i686-buildroot
+      baseurl=https://kojipkgs.fedoraproject.org/repos/${KOJI_TAG}/latest/i386/
+      gpgcheck=0
+
+      [rakuos]
+      name=rakuos
+      baseurl=https://repo.rakuos.org/rakuos/${RAKUOS_RELEASEVER}/
+      gpgcheck=1
+      gpgkey=https://repo.rakuos.org/pubkey.gpg
+      """
+      EOF
+
+        echo "== mock --target i686 rebuild =="
+        mkdir -p "$TOPDIR/RPMS/i686-mock-result"
+        mock -r "$MOCK_CFG_NAME" \
+          --resultdir="$TOPDIR/RPMS/i686-mock-result" \
+          --define "_topdir /builddir/build" \
+          --nocheck \
+          --no-cleanup-after \
+          --rebuild "$I686_SRPM" 2>&1 | tee "$CI_PROJECT_DIR/rpmbuild-i686.log" || \
+        { tail -300 "$CI_PROJECT_DIR/rpmbuild-i686.log" >&2; exit 1; }
+
+        echo "== copying built RPMs out of the mock chroot =="
+        rm -rf "$TOPDIR/RPMS/i686-mock-result/copyout"
+        mock -r "$MOCK_CFG_NAME" --copyout /builddir/build/RPMS "$TOPDIR/RPMS/i686-mock-result/copyout" 2>&1 | tail -20
+
+        echo "-- mock resultdir contents:"
+        find "$TOPDIR/RPMS/i686-mock-result" -type f -name '*.rpm' -exec basename {} \; | sed 's/^/     /'
+
+        mkdir -p "$TOPDIR/RPMS/i686"
+        find "$TOPDIR/RPMS/i686-mock-result" -type f \
+          \( -name 'apparmor-libs-*.i686.rpm' -o -name 'apparmor-devel-*.i686.rpm' \) \
+          -exec cp {} "$TOPDIR/RPMS/i686/" \;
+
+        : > /tmp/i686_to_upload
+        find "$TOPDIR/RPMS/i686" -type f -name '*.i686.rpm' >> /tmp/i686_to_upload
+        if [ ! -s /tmp/i686_to_upload ]; then
+          echo "ERROR: expected apparmor-libs/-devel i686 RPMs, found none"
+          exit 1
+        fi
+        echo "-- i686 RPM(s) selected for upload:"; sed 's/^/     /' /tmp/i686_to_upload
+      else
+        : > /tmp/i686_to_upload
+      fi
+
+      # ── 5. Upload to rakurpm ───────────────────────────────────────────────────
+      UPLOAD_URL="https://$RAKURPM_IP$ADMIN/api/repos/$TARGET_REPO/packages"
+      echo "== Upload endpoint: $UPLOAD_URL =="
+      : > /tmp/built_names
+      : > /tmp/uploaded_files
+      uploaded=0
+      for rpm in $(find "$TOPDIR/RPMS" -type f -name '*.rpm' \
+                     ! -path '*/i686/*' ! -name '*-debuginfo-*' ! -name '*-debugsource-*'; \
+                   cat /tmp/i686_to_upload 2>/dev/null); do
+        echo "↑ $(basename "$rpm")"
+        touch /tmp/rpm_resp
+        code=$(curl -k -s -o /tmp/rpm_resp -w '%{http_code}' \
+          -H "Authorization: Bearer $RAKURPM_TOKEN" \
+          -F "file=@${rpm}" \
+          -F "source=GitLab CI/CD" \
+          "$UPLOAD_URL") || code=000
+        echo "   HTTP $code"
+        if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+          echo "   ----- response body -----"; head -c 500 /tmp/rpm_resp || true; echo
+          exit 1
+        fi
+        rpm -qp --nosignature --qf '%{NAME}\n' "$rpm" >> /tmp/built_names 2>/dev/null || true
+        echo "   response: $(cat /tmp/rpm_resp)"
+        jq -r '.package // empty' /tmp/rpm_resp >> /tmp/uploaded_files 2>/dev/null || true
+        uploaded=$((uploaded + 1))
+      done
+      [ "$uploaded" -gt 0 ] || { echo "ERROR: no RPMs built"; exit 1; }
+      echo "== Uploaded $uploaded package(s) to '$TARGET_REPO' =="
+
+      # ── 6. Prune previous versions ─────────────────────────────────────────────
+      echo "== Pruning previous versions in '$TARGET_REPO' =="
+      curl -k -s -H "Authorization: Bearer $RAKURPM_TOKEN" \
+        "https://$RAKURPM_IP$ADMIN/api/repos/$TARGET_REPO" -o /tmp/repo.json || true
+      jq -r '.packages[].name' /tmp/repo.json > /tmp/repo_files 2>/dev/null || : > /tmp/repo_files
+      : > /tmp/to_delete
+      while read -r name; do
+        [ -n "$name" ] || continue
+        while read -r f; do
+          grep -qxF "$f" /tmp/uploaded_files || echo "$f" >> /tmp/to_delete
+        done < <(grep -E "^${name}-[0-9]" /tmp/repo_files 2>/dev/null || true)
+      done < <(sort -u /tmp/built_names)
+      if [ -s /tmp/to_delete ]; then
+        sort -u /tmp/to_delete -o /tmp/to_delete
+        echo "Deleting $(wc -l < /tmp/to_delete) old package(s):"; sed 's/^/   - /' /tmp/to_delete
+        FILES_JSON=$(jq -R -s 'split("\n") | map(select(length>0))' /tmp/to_delete)
+        curl -k -s -X POST \
+          -H "Authorization: Bearer $RAKURPM_TOKEN" -H "Content-Type: application/json" \
+          --data "{\"files\": $FILES_JSON}" \
+          "https://$RAKURPM_IP$ADMIN/api/repos/$TARGET_REPO/packages/delete" || true
+      else
+        echo "No previous versions to prune."
+      fi
+
+  artifacts:
+    paths:
+      - rpmbuild/RPMS/
+      - rpmbuild.log
+      - rpmbuild-i686.log
+    when: always
+    expire_in: 1 week
+
+sync:repos:
+  stage: sync
+  image: alpine:latest
+  tags: [saas-linux-small-amd64]
+  needs:
+    - job: build:rpm
+      optional: true
+  script:
+    - apk add --no-cache curl
+    - ADMIN=${RAKURPM_ADMIN_PREFIX:-/backend}
+    - echo "== Triggering sync for all pending repos =="
+    - |
+      curl -k -sf -X POST \
+        -H "Authorization: Bearer $RAKURPM_TOKEN" \
+        "https://$RAKURPM_IP$ADMIN/api/sync-pending"
+    - echo "== Sync complete =="

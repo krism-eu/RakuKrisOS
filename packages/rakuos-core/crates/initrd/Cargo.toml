@@ -1,0 +1,12 @@
+[package]
+name = "rakuos-initrd"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rakuos-overlay-mount"
+path = "src/bin/overlay_mount.rs"
+
+[dependencies]
+anyhow = "1"
+nix = { version = "0.29", features = ["mount"] }

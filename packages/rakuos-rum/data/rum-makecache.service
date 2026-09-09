@@ -1,0 +1,11 @@
+[Unit]
+Description=rum makecache
+Documentation=man:rum(8)
+ConditionACPower=true
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rum makecache
+IOSchedulingClass=idle

@@ -1,0 +1,17 @@
+[Unit]
+Description=RakuOS Overlay Update — background package rebuild after image update
+Documentation=https://rakuos.org
+After=graphical.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/rakuos/image-update.marker
+ConditionPathExists=/var/lib/rakuos/packages.list
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/rakuos/rakuos-overlay-update
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=RakuOS bootc image switch
+Documentation=https://rakuos.org
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RuntimeDirectory=rakuos
+RuntimeDirectoryPreserve=yes
+EnvironmentFile=/run/rakuos/bootc-switch-target
+ExecStart=/usr/bin/bootc switch ${BOOTC_SWITCH_TARGET}
+ExecStartPost=/usr/bin/fc-cache -f
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rakuos-bootc-switch

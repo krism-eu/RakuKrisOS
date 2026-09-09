@@ -1,0 +1,212 @@
+#!/usr/bin/bash
+# setup-uutils — Switch between uutils (Rust coreutils) and GNU coreutils system-wide.
+# Manages /usr/bin/* commands via `alternatives`.
+# uutils mode: uu-* for coreutils, lsd for ls, bat for cat.
+# gnu mode:    GNU .og originals for everything.
+# Supported modes: uutils (RakuOS default), gnu
+set -euo pipefail
+
+MODE="${1:-}"
+
+# Commands skipped in the main uu_* loop.
+# ls/cat are handled separately (lsd/bat take priority).
+SKIP_ALWAYS=(ls cat)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+die()  { echo "Error: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+
+need_root() {
+    [[ $EUID -eq 0 ]] || die "This command must be run as root."
+}
+
+is_skipped() {
+    local name="$1"
+    for s in "${SKIP_ALWAYS[@]}"; do
+        [[ "$name" == "$s" ]] && return 0
+    done
+    return 1
+}
+
+# Enumerate all uu_* binaries, emit bare names (without uu_ prefix)
+uu_names() {
+    for f in /usr/bin/uu_*; do
+        [[ -x "$f" ]] || continue
+        local n="${f#/usr/bin/uu_}"
+        [[ "$n" == "coreutils" ]] && continue  # skip the uutils-coreutils meta-binary
+        echo "$n"
+    done | /usr/bin/uu_sort
+}
+
+# ── Mode handlers ─────────────────────────────────────────────────────────────
+
+setup_uutils() {
+    need_root
+
+    local count=0
+
+    # Wire all uu-* coreutils
+    while IFS= read -r name; do
+        is_skipped "$name" && continue
+
+        local uu_bin="/usr/bin/uu_${name}"
+        local target="/usr/bin/${name}"
+        local gnu_bin="/usr/bin/gnu_${name}"
+
+        [[ -x "$uu_bin" ]] || continue
+
+        alternatives --install "$target" "$name" "$uu_bin" 60 2>/dev/null || true
+        [[ -f "$gnu_bin" ]] && \
+            alternatives --install "$target" "$name" "$gnu_bin" 30 2>/dev/null || true
+        alternatives --set "$name" "$uu_bin"
+        (( count++ )) || true
+    done < <(uu_names)
+
+    # Wire ls: lsd (60) > uu_ls (50) > gnu_ls (30); default = lsd
+    if command -v lsd &>/dev/null; then
+        alternatives --install /usr/bin/ls ls "$(command -v lsd)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_ls ]] && \
+            alternatives --install /usr/bin/ls ls /usr/bin/uu_ls 50 2>/dev/null || true
+        [[ -f /usr/bin/gnu_ls ]] && \
+            alternatives --install /usr/bin/ls ls /usr/bin/gnu_ls 30 2>/dev/null || true
+        alternatives --set ls "$(command -v lsd)"
+        (( count++ )) || true
+    fi
+
+    # Wire cat: bat (60) > uu_cat (50) > gnu_cat (30); default = bat
+    if command -v bat &>/dev/null; then
+        alternatives --install /usr/bin/cat cat "$(command -v bat)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_cat ]] && \
+            alternatives --install /usr/bin/cat cat /usr/bin/uu_cat 50 2>/dev/null || true
+        [[ -f /usr/bin/gnu_cat ]] && \
+            alternatives --install /usr/bin/cat cat /usr/bin/gnu_cat 30 2>/dev/null || true
+        alternatives --set cat "$(command -v bat)"
+        (( count++ )) || true
+    fi
+
+    mkdir -p /var/lib/rakuos
+    echo "uutils" > /var/lib/rakuos/user-uutils
+    info "uutils: $count commands wired (uu-* coreutils, lsd→ls, bat→cat)"
+}
+
+setup_gnu() {
+    need_root
+
+    local count=0 missing=0
+
+    # Restore all uu-* backed coreutils to GNU .og
+    while IFS= read -r name; do
+        is_skipped "$name" && continue
+
+        local uu_bin="/usr/bin/uu_${name}"
+        local target="/usr/bin/${name}"
+        local gnu_bin="/usr/bin/gnu_${name}"
+
+        [[ -f "$gnu_bin" ]] || { (( missing++ )) || true; continue; }
+
+        alternatives --install "$target" "$name" "$gnu_bin" 30 2>/dev/null || true
+        [[ -x "$uu_bin" ]] && \
+            alternatives --install "$target" "$name" "$uu_bin" 60 2>/dev/null || true
+        alternatives --set "$name" "$gnu_bin" 2>/dev/null || true
+        (( count++ )) || true
+    done < <(uu_names)
+
+    # Restore ls and cat to GNU (keep lsd/uu_ls and bat/uu_cat registered)
+    if [[ -f /usr/bin/gnu_ls ]]; then
+        alternatives --install /usr/bin/ls ls /usr/bin/gnu_ls 30 2>/dev/null || true
+        command -v lsd &>/dev/null && \
+            alternatives --install /usr/bin/ls ls "$(command -v lsd)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_ls ]] && \
+            alternatives --install /usr/bin/ls ls /usr/bin/uu_ls 50 2>/dev/null || true
+        alternatives --set ls /usr/bin/gnu_ls 2>/dev/null || true
+        (( count++ )) || true
+    fi
+
+    if [[ -f /usr/bin/gnu_cat ]]; then
+        alternatives --install /usr/bin/cat cat /usr/bin/gnu_cat 30 2>/dev/null || true
+        command -v bat &>/dev/null && \
+            alternatives --install /usr/bin/cat cat "$(command -v bat)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_cat ]] && \
+            alternatives --install /usr/bin/cat cat /usr/bin/uu_cat 50 2>/dev/null || true
+        alternatives --set cat /usr/bin/gnu_cat 2>/dev/null || true
+        (( count++ )) || true
+    fi
+
+    mkdir -p /var/lib/rakuos
+    echo "gnu" > /var/lib/rakuos/user-uutils
+    info "GNU: $count commands restored to original GNU coreutils"
+    [[ $missing -gt 0 ]] && info "  ($missing gnu_ originals not found — skipped)" || true
+}
+
+# image-default: register all coreutils with alternatives and set GNU as the
+# active default. Used in post-build so the image ships with GNU active and
+# alternatives db is fully populated for runtime switching.
+setup_image_default() {
+    need_root
+
+    local count=0 missing=0
+
+    while IFS= read -r name; do
+        is_skipped "$name" && continue
+
+        local uu_bin="/usr/bin/uu_${name}"
+        local target="/usr/bin/${name}"
+        local gnu_bin="/usr/bin/gnu_${name}"
+
+        [[ -f "$gnu_bin" ]] || { (( missing++ )) || true; continue; }
+
+        alternatives --install "$target" "$name" "$gnu_bin" 30 2>/dev/null || true
+        [[ -x "$uu_bin" ]] && \
+            alternatives --install "$target" "$name" "$uu_bin" 60 2>/dev/null || true
+        alternatives --set "$name" "$gnu_bin" 2>/dev/null || true
+        (( count++ )) || true
+    done < <(uu_names)
+
+    if [[ -f /usr/bin/gnu_ls ]]; then
+        alternatives --install /usr/bin/ls ls /usr/bin/gnu_ls 30 2>/dev/null || true
+        command -v lsd &>/dev/null && \
+            alternatives --install /usr/bin/ls ls "$(command -v lsd)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_ls ]] && \
+            alternatives --install /usr/bin/ls ls /usr/bin/uu_ls 50 2>/dev/null || true
+        alternatives --set ls /usr/bin/gnu_ls 2>/dev/null || true
+        (( count++ )) || true
+    fi
+
+    if [[ -f /usr/bin/gnu_cat ]]; then
+        alternatives --install /usr/bin/cat cat /usr/bin/gnu_cat 30 2>/dev/null || true
+        command -v bat &>/dev/null && \
+            alternatives --install /usr/bin/cat cat "$(command -v bat)" 60 2>/dev/null || true
+        [[ -x /usr/bin/uu_cat ]] && \
+            alternatives --install /usr/bin/cat cat /usr/bin/uu_cat 50 2>/dev/null || true
+        alternatives --set cat /usr/bin/gnu_cat 2>/dev/null || true
+        (( count++ )) || true
+    fi
+
+    mkdir -p /var/lib/rakuos
+    echo "gnu" > /var/lib/rakuos/user-uutils
+    info "image-default: $count commands registered with alternatives, GNU set as default"
+    [[ $missing -gt 0 ]] && info "  ($missing gnu_ originals not found — skipped)" || true
+}
+
+usage() {
+    echo "RakuOS coreutils switcher"
+    echo ""
+    echo "Usage:  rakuos setup-uutils <mode>"
+    echo ""
+    echo "Modes:"
+    echo "  uutils   uutils Rust coreutils, lsd for ls, bat for cat (RakuOS default)"
+    echo "  gnu      Traditional GNU coreutils for everything"
+    echo ""
+    alternatives --display ls  2>/dev/null || true
+    alternatives --display cat 2>/dev/null || true
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+case "$MODE" in
+    uutils)         setup_uutils        ;;
+    gnu)            setup_gnu           ;;
+    image-default)  setup_image_default ;;
+    *)       usage; [[ -z "$MODE" ]] && exit 0 || exit 1 ;;
+esac

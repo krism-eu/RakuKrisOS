@@ -1,0 +1,25 @@
+[package]
+name = "rum-librepo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+libc = "0.2"
+
+[build-dependencies]
+pkg-config = "0.3"
+
+# Unlike rum-solv (see crates/rum-solv/Cargo.toml), there's no
+# `regen-bindings` feature here: librepo's public API is small, but its
+# `lr_handle_setopt(handle, &err, LRO_OPTION, ...)` is a genuine C varargs
+# function and its error convention is GLib's `GError**` out-param — neither
+# bindgen's usual struct/enum/extern-fn generation nor its (limited, feature-
+# gated) varargs support produce a usable Rust signature for it, so the FFI
+# layer in `src/sys.rs` is hand-written directly against
+# `/usr/include/librepo/*.h` and `glib.h` rather than bindgen output. The
+# surface used (LrHandle, LrDownloadTarget, LrHandleOption, GError) is
+# librepo's stable public ABI, documented and unchanged across the versions
+# dnf5 itself supports.

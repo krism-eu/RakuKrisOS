@@ -1,0 +1,15 @@
+[package]
+name = "rum-dnf-shim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dnf"
+path = "src/main.rs"
+
+[[bin]]
+name = "dnf5"
+path = "src/main.rs"
+
+[dependencies]

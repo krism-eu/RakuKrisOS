@@ -1,0 +1,16 @@
+[Unit]
+Description=RakuOS Overlay Mount
+DefaultDependencies=no
+Requires=ostree-prepare-root.service
+After=ostree-prepare-root.service
+Before=initrd-root-fs.target initrd-switch-root.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/rakuos/rakuos-overlay-mount
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=initrd-root-fs.target

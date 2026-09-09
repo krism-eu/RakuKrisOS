@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/overlay", "crates/pkgmgr", "crates/initrd", "crates/systems"]
+resolver = "2"

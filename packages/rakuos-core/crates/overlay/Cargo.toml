@@ -1,0 +1,22 @@
+[package]
+name = "rakuos-overlay"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rakuos-overlay-sync"
+path = "src/bin/sync.rs"
+
+[[bin]]
+name = "rakuos-overlay-update"
+path = "src/bin/update.rs"
+
+[[bin]]
+name = "rakuos-reset-overlay"
+path = "src/bin/reset.rs"
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+nix = { version = "0.29", features = ["mount"] }
+walkdir = "2"

@@ -1,0 +1,26 @@
+[package]
+name = "rum-solv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rum-core = { workspace = true }
+anyhow = { workspace = true }
+
+[build-dependencies]
+bindgen = { version = "0.70", features = ["experimental"], optional = true }
+pkg-config = "0.3"
+cc = "1"
+
+[features]
+# Regenerate crates/rum-solv/generated/{bindings.rs,static_fns.c} from the
+# system's libsolv headers via bindgen instead of using the committed,
+# pre-generated copies. Off by default so ordinary builds (including RPM
+# builds) don't need libclang/clang-devel at all — pulling in clang-devel
+# on EL10 drags in a newer llvm-libs than the distro's own `rust` package
+# is built against, making the two BuildRequires mutually uninstallable.
+# Maintainers run `cargo build -p rum-solv --features regen-bindings` after
+# upgrading libsolv to refresh the vendored files.
+regen-bindings = ["dep:bindgen"]
