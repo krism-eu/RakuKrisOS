@@ -34,10 +34,18 @@ LABEL ostree.bootable="1"
 
 # RakuOS repository and signing key. Fedora repositories remain enabled.
 COPY build_files/rakuos.repo /etc/yum.repos.d/rakuos.repo
-RUN curl --fail --silent --show-error --location \
-        https://repo.rakuos.org/pubkey.gpg \
-        --output /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos \
-    && rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos
+RUN set -eux; \
+    curl --fail --silent --show-error --location \
+      https://repo.rakuos.org/pubkey.gpg \
+      --output /tmp/RPM-GPG-KEY-rakuos; \
+    install -o root -g root -m 0644 /tmp/RPM-GPG-KEY-rakuos \
+      /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos; \
+    chown root:root /etc/yum.repos.d/rakuos.repo; \
+    chmod 0644 /etc/yum.repos.d/rakuos.repo; \
+    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos; \
+    rm -f /tmp/RPM-GPG-KEY-rakuos; \
+    test "$(stat -c '%U:%G %a' /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"; \
+    test "$(stat -c '%U:%G %a' /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
 
 # One source of truth for the immutable base. Weak dependencies stay disabled:
 # optional native applications belong to the persistent RUM overlay.
@@ -102,8 +110,9 @@ RUN set -eux; \
       [ -e "$moddir/vmlinuz" ] || continue; \
       found_kernel=1; \
       dracut --force --no-hostonly "$moddir/initramfs.img" "$kver"; \
-      lsinitrd "$moddir/initramfs.img" | grep -q 'rakuos-overlay-mount'; \
-      lsinitrd "$moddir/initramfs.img" | grep -q '90rakuos-overlay'; \
+      lsinitrd "$moddir/initramfs.img" | grep -Fq 'usr/lib/rakuos/rakuos-overlay-mount'; \
+      lsinitrd "$moddir/initramfs.img" | grep -Fq 'usr/lib/systemd/system/rakuos-overlay-mount.service'; \
+      lsinitrd "$moddir/initramfs.img" | grep -Fq 'initrd-root-fs.target.wants/rakuos-overlay-mount.service'; \
     done; \
     [ "$found_kernel" -eq 1 ]; \
     if [ "$root_was_symlink" -eq 1 ]; then \
@@ -128,6 +137,8 @@ RUN set -eux; \
     test -x /usr/bin/ostree; \
     test -x /usr/bin/rum; \
     test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount; \
+    test "$(stat -c '%U:%G %a' /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"; \
+    test "$(stat -c '%U:%G %a' /etc/yum.repos.d/rakuos.repo)" = "root:root 644"; \
     test -e /usr/lib/dracut/modules.d/90rakuos-overlay/module-setup.sh; \
     test -e /usr/lib/systemd/system/ostree-finalize-staged.service; \
     test -e /usr/lib/systemd/system/plasmalogin.service; \
