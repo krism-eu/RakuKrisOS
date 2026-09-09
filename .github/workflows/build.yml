@@ -86,10 +86,8 @@ jobs:
             grep -qx plasma /usr/share/rakuos/de-name
             test -s /usr/share/rakuos/protected-packages.txt
             test -s /usr/share/rakuos/base-manifest.txt
-            test -s /usr/share/factory/var/lib/rakuos/packages.list
-            grep -qx dolphin /usr/share/factory/var/lib/rakuos/packages.list
-            grep -qx konsole /usr/share/factory/var/lib/rakuos/packages.list
-            grep -qx kate /usr/share/factory/var/lib/rakuos/packages.list
+            test -e /usr/share/factory/var/lib/rakuos/packages.list
+            test ! -s /usr/share/factory/var/lib/rakuos/packages.list
 
             ! rpm -q glibc-all-langpacks >/dev/null 2>&1
           '
