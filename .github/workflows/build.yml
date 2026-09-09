@@ -35,8 +35,15 @@ jobs:
 
       - name: Install Buildah
         run: |
+          set -euxo pipefail
+          # GitHub's Ubuntu image can carry third-party apt sources. They are
+          # irrelevant to this build and a transient bad index (e.g. Chrome)
+          # must not prevent Buildah from being installed from Ubuntu itself.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
-          sudo apt-get install -y buildah
+          sudo apt-get install -y --no-install-recommends buildah
+          buildah --version
 
       - name: Normalize image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
