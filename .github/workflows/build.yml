@@ -57,9 +57,9 @@ jobs:
           set -euxo pipefail
           sudo buildah from --name rakukrisos-validation "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
           sudo buildah run rakukrisos-validation -- rpm -q \
-            bootc ostree rakuos-core rakuos-rum plasma-workspace kwin sddm
+            bootc ostree rakuos-core rakuos-rum plasma-workspace kwin plasma-login-manager
           sudo buildah run rakukrisos-validation -- \
-            sh -c 'test -x /usr/bin/rum && test -r /etc/rum/rum.conf && grep -q "install_weak_deps=0" /etc/rum/rum.conf && grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf'
+            sh -c 'test -x /usr/bin/rum && test -r /etc/rum/rum.conf && grep -q "install_weak_deps=0" /etc/rum/rum.conf && grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf && test -e /usr/lib/systemd/system/plasma-login-manager.service'
           sudo buildah rm rakukrisos-validation
 
       - name: Login to GitHub Container Registry
