@@ -44,7 +44,10 @@ if old not in s:
     raise SystemExit('expected upstream empty-upper block not found; refusing to build against changed source')
 p.write_text(s.replace(old, new, 1))
 PY
-RUN cd /src && cargo build --locked --release -p rakuos-initrd
+RUN set -eux; \
+    cd /src; \
+    cargo build --locked --release -p rakuos-initrd --target-dir /out; \
+    test -x /out/release/rakuos-overlay-mount
 
 FROM quay.io/bootc-devel/fedora-bootc-44-minimal:latest
 
@@ -82,7 +85,7 @@ RUN set -eux; \
 # the dnf/dnf5 command-line package manager.
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         rakuos-core rakuos-rum rum-dnf-shim
-COPY --from=overlay-builder /src/target/release/rakuos-overlay-mount \
+COPY --from=overlay-builder /out/release/rakuos-overlay-mount \
     /usr/lib/rakuos/initrd/rakuos-overlay-mount
 RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
