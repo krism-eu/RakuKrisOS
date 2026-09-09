@@ -73,6 +73,8 @@ jobs:
           buildah run rakukrisos-validation -- sh -euxc '
             test -x /usr/bin/rum
             test -r /etc/rum/rum.conf
+            test "$(stat -c "%U:%G %a" /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"
+            test "$(stat -c "%U:%G %a" /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
             grep -q "install_weak_deps=0" /etc/rum/rum.conf
             grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf
 
@@ -98,8 +100,9 @@ jobs:
             for img in /usr/lib/modules/*/initramfs.img; do
               test -f "$img" || continue
               found_initramfs=1
-              lsinitrd "$img" | grep -q rakuos-overlay-mount
-              lsinitrd "$img" | grep -q 90rakuos-overlay
+              lsinitrd "$img" | grep -Fq usr/lib/rakuos/rakuos-overlay-mount
+              lsinitrd "$img" | grep -Fq usr/lib/systemd/system/rakuos-overlay-mount.service
+              lsinitrd "$img" | grep -Fq initrd-root-fs.target.wants/rakuos-overlay-mount.service
             done
             test "$found_initramfs" -eq 1
 
