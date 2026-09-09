@@ -47,7 +47,9 @@ PY
 RUN set -eux; \
     cd /src; \
     cargo build --locked --release -p rakuos-initrd --target-dir /out; \
-    test -x /out/release/rakuos-overlay-mount
+    test -x /out/release/rakuos-overlay-mount; \
+    install -D -m 0755 /out/release/rakuos-overlay-mount /usr/local/bin/rakuos-overlay-mount; \
+    test -x /usr/local/bin/rakuos-overlay-mount
 
 FROM quay.io/bootc-devel/fedora-bootc-44-minimal:latest
 
@@ -85,7 +87,7 @@ RUN set -eux; \
 # the dnf/dnf5 command-line package manager.
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         rakuos-core rakuos-rum rum-dnf-shim
-COPY --from=overlay-builder /out/release/rakuos-overlay-mount \
+COPY --from=overlay-builder /usr/local/bin/rakuos-overlay-mount \
     /usr/lib/rakuos/initrd/rakuos-overlay-mount
 RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
