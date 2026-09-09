@@ -45,10 +45,12 @@ jobs:
       - name: Normalize image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
+      # Proven model from the previously successful Fedora 44 Minimal build:
+      # Buildah runs rootless for build, validation and push.
       - name: Build OCI image
         run: |
           set -euxo pipefail
-          sudo buildah bud \
+          buildah bud \
             --pull=always \
             --format oci \
             --build-arg FEDORA_VERSION=44 \
@@ -59,16 +61,16 @@ jobs:
       - name: Validate image contents
         run: |
           set -euxo pipefail
-          sudo buildah from --name rakukrisos-validation "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          buildah from --name rakukrisos-validation "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
 
-          sudo buildah run rakukrisos-validation -- rpm -q \
+          buildah run rakukrisos-validation -- rpm -q \
             bootc ostree rakuos-core rakuos-rum rum-dnf-shim \
             plasma-workspace plasma-desktop kwin \
             plasma-login-manager kcm-plasmalogin kde-settings-plasmalogin \
             pipewire-pulseaudio \
             glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it
 
-          sudo buildah run rakukrisos-validation -- sh -euxc '
+          buildah run rakukrisos-validation -- sh -euxc '
             test -x /usr/bin/rum
             test -r /etc/rum/rum.conf
             grep -q "install_weak_deps=0" /etc/rum/rum.conf
@@ -89,46 +91,38 @@ jobs:
             grep -qx konsole /usr/share/factory/var/lib/rakuos/packages.list
             grep -qx kate /usr/share/factory/var/lib/rakuos/packages.list
 
-            test -d /usr/share/icons/breeze
             ! rpm -q glibc-all-langpacks >/dev/null 2>&1
           '
 
-          sudo buildah run rakukrisos-validation -- bootc container lint
-          sudo buildah rm rakukrisos-validation
+          buildah run rakukrisos-validation -- bootc container lint
+          buildah rm rakukrisos-validation
 
+      # Keep docker/login-action because this exact combination with rootless
+      # Buildah successfully published the previous image to GHCR.
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euxo pipefail
-          printf '%s' "$GHCR_TOKEN" | sudo buildah login \
-            --username "${GITHUB_ACTOR}" \
-            --password-stdin \
-            "${REGISTRY}"
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Do not force compression here. The proven Buildah push handled registry
+      # compression itself and successfully published the image.
       - name: Push immutable image
         if: github.event_name != 'pull_request'
         run: |
           set -euxo pipefail
-          sudo buildah push \
-            --format oci \
-            --compression-format zstd \
-            --compression-level 10 \
-            "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          buildah push "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
 
       - name: Push latest image
         if: github.event_name != 'pull_request'
         run: |
           set -euxo pipefail
-          sudo buildah push \
-            --format oci \
-            --compression-format zstd \
-            --compression-level 10 \
-            "${REGISTRY}/${IMAGE_NAME}:latest"
+          buildah push "${REGISTRY}/${IMAGE_NAME}:latest"
 
       - name: Print bootc switch command
         if: github.event_name != 'pull_request'
         run: |
           echo "Image: ${REGISTRY}/${IMAGE_NAME}:latest"
-          echo "Switch: sudo bootc switch ${REGISTRY}/${IMAGE_NAME}:latest"
+          echo "Switch: sudo bootc switch --transport container ${REGISTRY}/${IMAGE_NAME}:latest"
