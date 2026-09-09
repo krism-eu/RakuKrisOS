@@ -7,7 +7,7 @@ dracut
 ostree
 systemd
 
-# Minimal graphical desktop base: Plasma workspace + KWin + SDDM
+# Minimal graphical desktop base: Plasma workspace + KWin + Plasma Login Manager
 plasma-workspace
 plasma-workspace-common
 plasma-workspace-libs
@@ -15,7 +15,7 @@ kwin
 kwin-common
 kwin-libs
 kwayland
-sddm
+plasma-login-manager
 
 # Core desktop integration required for a usable Plasma session
 plasma-nm
@@ -34,7 +34,6 @@ xdg-user-dirs
 # Audio/session plumbing
 pipewire
 pipewire-alsa
-pipewire-pulse
 pipewire-jack-audio-connection-kit
 wireplumber
 phonon-qt6
