@@ -6,6 +6,7 @@ FROM fedora:44 AS overlay-builder
 ARG RAKUOS_SOURCE_REV=7d6a4e9ed535eb00f425ef7261a254a5d0043bab
 RUN dnf5 -y --setopt=install_weak_deps=False install cargo rust curl python3 \
     && dnf5 clean all
+COPY build_files/patch_overlay_mount.py /usr/local/libexec/patch_overlay_mount.py
 RUN set -eux; \
     mkdir -p /src/crates/initrd/src/bin; \
     base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
@@ -13,38 +14,7 @@ RUN set -eux; \
     curl -fL "$base/Cargo.lock" -o /src/Cargo.lock; \
     curl -fL "$base/crates/initrd/Cargo.toml" -o /src/crates/initrd/Cargo.toml; \
     curl -fL "$base/crates/initrd/src/bin/overlay_mount.rs" -o /src/crates/initrd/src/bin/overlay_mount.rs; \
-    python3 - <<'PY'
-from pathlib import Path
-p = Path('/src/crates/initrd/src/bin/overlay_mount.rs')
-s = p.read_text()
-old = '''    // Upper dir empty — seed RPM db and exit for sync to install
-    if dir_is_empty(&upper_dir) {
-        log("seeding RPM db into upper dir before first install...");
-        let seed_rpmdb = upper_dir.join("share/rpm");
-        fs::create_dir_all(&seed_rpmdb)?;
-        copy_dir_contents(&base_rpm_db, &seed_rpmdb)?;
-        remove_rpmdb_locks(&seed_rpmdb);
-        log("RPM db seeded — sync will handle install.");
-        return Ok(());
-    }
-'''
-new = '''    // An empty upperdir is valid on a fresh Fedora Minimal deployment.
-    // Seed the rpmdb view, but DO NOT return: /usr must already be an overlay
-    // before switch-root so RUM can safely persist native packages later.
-    if dir_is_empty(&upper_dir) {
-        log("seeding RPM db into empty upper dir...");
-        let seed_rpmdb = upper_dir.join("share/rpm");
-        fs::create_dir_all(&seed_rpmdb)?;
-        copy_dir_contents(&base_rpm_db, &seed_rpmdb)?;
-        remove_rpmdb_locks(&seed_rpmdb);
-        log("RPM db seeded — continuing to mount persistent overlay.");
-    }
-'''
-if old not in s:
-    raise SystemExit('expected upstream empty-upper block not found; refusing to build against changed source')
-p.write_text(s.replace(old, new, 1))
-PY
-RUN set -eux; \
+    python3 /usr/local/libexec/patch_overlay_mount.py; \
     cd /src; \
     cargo build --locked --release -p rakuos-initrd --target-dir /out; \
     test -x /out/release/rakuos-overlay-mount; \
