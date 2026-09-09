@@ -50,13 +50,11 @@ pipewire-jack-audio-connection-kit
 wireplumber
 phonon-qt6
 
-# Small, explicit visual baseline. Do not pull all font families/themes.
+# Visual baseline: icons/cursor only. Do not add font collections explicitly;
+# keep only whatever font packages are pulled as hard dependencies by Fedora/Plasma.
 breeze-icon-theme
 kf6-breeze-icons
 breeze-cursor-theme
-google-noto-sans-fonts
-google-noto-sans-mono-fonts
-google-noto-color-emoji-fonts
 
 # Languages/locales: English + Italian only; never glibc-all-langpacks.
 glibc-langpack-en
