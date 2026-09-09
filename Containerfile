@@ -5,6 +5,8 @@ ARG RAKUKRISOS_RELEASE=0.1.0
 LABEL org.opencontainers.image.title="RakuKrisOS"
 LABEL org.opencontainers.image.version="${RAKUKRISOS_RELEASE}"
 LABEL org.opencontainers.image.description="Fedora 44 bootc Minimal desktop with the RakuOS persistent overlay and RUM"
+LABEL containers.bootc="1"
+LABEL ostree.bootable="1"
 
 # RakuOS uses its own signing key. Keep the repository definition explicit so
 # image builds and later RUM transactions use the same trust configuration.
@@ -19,7 +21,8 @@ RUN curl --fail --silent --show-error --location \
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         bootc bootupd composefs composefs-libs dracut ostree systemd flatpak \
         plasma-workspace plasma-workspace-common plasma-workspace-libs \
-        kwin kwin-common kwin-libs kwayland plasma-login-manager \
+        kwin kwin-common kwin-libs kwayland \
+        plasma-login-manager kcm-plasmalogin \
         plasma-nm plasma-pa plasma-integration \
         kde-cli-tools polkit-kde polkit-qt6-1 powerdevil kglobalacceld ksystemstats \
         xdg-desktop-portal xdg-desktop-portal-kde xdg-user-dirs \
@@ -39,8 +42,8 @@ COPY config/rum.conf /etc/rum/rum.conf
 # Removing SELinux before that point can make ostree-finalize-staged fail and
 # produce exactly the kind of deployment rollback RakuKrisOS must avoid.
 
-# Fedora 44's package is named plasma-login-manager, but the system unit is
-# plasmalogin.service and it owns the display-manager.service alias.
+# Plasma Login Manager owns the graphical login path used by the previous
+# working RakuKrisOS build.
 RUN systemctl enable --force plasmalogin.service \
     && systemctl set-default graphical.target
 
