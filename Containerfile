@@ -71,6 +71,7 @@ COPY --from=overlay-builder /usr/local/bin/rakuos-overlay-mount \
 RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
 COPY config/rum.conf /etc/rum/rum.conf
+COPY build_files/systemd/ /etc/systemd/system/
 
 # Starting from Fedora Minimal means all RakuOS state contracts must be seeded
 # explicitly. No default native applications are installed at boot: an empty
@@ -144,6 +145,10 @@ RUN set -eux; \
     test -e /usr/lib/systemd/system/plasmalogin.service; \
     test -e /usr/lib/systemd/system/rakuos-overlay-sync.service; \
     test -e /usr/lib/systemd/system/rakuos-base-protect.service; \
+    test -e /etc/systemd/system/rakuos-base-protect.service.d/rakukrisos.conf; \
+    systemd-analyze verify rakuos-base-protect.service; \
+    systemctl --root=/ is-enabled rakuos-base-protect.service; \
+    systemctl --root=/ is-enabled plasmalogin.service; \
     test -s /usr/share/rakuos/protected-packages.txt; \
     test -s /usr/share/rakuos/base-manifest.txt; \
     test -e /usr/share/factory/var/lib/rakuos/packages.list; \
