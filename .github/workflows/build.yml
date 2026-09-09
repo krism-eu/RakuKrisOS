@@ -1,0 +1,62 @@
+name: Build RakuKrisOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Containerfile
+      - build_files/**
+      - config/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: rakukrisos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/rakukrisos
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Build image
+        run: |
+          set -euxo pipefail
+          sudo podman build \
+            --pull=always \
+            --tag "${IMAGE_NAME}:${GITHUB_SHA}" \
+            --tag "${IMAGE_NAME}:latest" \
+            -f Containerfile .
+
+      - name: Validate image
+        run: |
+          set -euxo pipefail
+          sudo podman run --rm "${IMAGE_NAME}:${GITHUB_SHA}" rpm -q \
+            bootc ostree rakuos-core rakuos-rum plasma-workspace kwin sddm
+          sudo podman run --rm "${IMAGE_NAME}:${GITHUB_SHA}" \
+            sh -c 'test -x /usr/bin/rum && test -r /etc/rum/rum.conf && grep -q "install_weak_deps=0" /etc/rum/rum.conf && grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf'
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euxo pipefail
+          sudo podman push "${IMAGE_NAME}:${GITHUB_SHA}"
+          sudo podman push "${IMAGE_NAME}:latest"
