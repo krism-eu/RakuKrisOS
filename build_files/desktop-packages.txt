@@ -67,7 +67,7 @@ kmenuedit
 ksshaskpass
 kwalletmanager5
 
-# Themes / boot integration
+# Themes
 breeze-cursor-theme
 breeze-gtk
 breeze-gtk-common
@@ -75,4 +75,3 @@ breeze-icon-theme
 kf6-breeze-icons
 qqc2-breeze-style
 ocean-sound-theme
-breeze-plymouth
