@@ -45,7 +45,6 @@ RUN set -eux; \
     chown root:root /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos /etc/yum.repos.d/rakuos.repo; \
     chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos /etc/yum.repos.d/rakuos.repo; \
     rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos; \
-    echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' | sha256sum --check --strict; \
     test "$(stat -c '%U:%G %a' /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"; \
     test "$(stat -c '%U:%G %a' /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
 
@@ -110,6 +109,7 @@ RUN systemctl enable --force plasmalogin.service \
 # Image invariants. Fail before publication when a Minimal-specific assumption
 # or a RakuOS path has been missed.
 RUN set -eux; \
+    echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' | sha256sum --check --strict; \
     test -x /usr/bin/bootc; \
     test -x /usr/bin/ostree; \
     test -x /usr/bin/rum; \

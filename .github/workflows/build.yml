@@ -80,6 +80,8 @@ jobs:
           buildah run rakukrisos-validation -- sh -euxc '
             test -x /usr/bin/rum
             test -r /etc/rum/rum.conf
+            echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' | sha256sum --check --strict
+            test -s /usr/share/rakukrisos/profiles/desktop-packages.txt
             test "$(stat -c "%U:%G %a" /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"
             test "$(stat -c "%U:%G %a" /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
             grep -q "install_weak_deps=0" /etc/rum/rum.conf
