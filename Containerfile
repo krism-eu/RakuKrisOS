@@ -2,9 +2,11 @@
 # revision. RakuKrisOS patches one important first-boot behavior: an empty
 # upperdir is seeded with the base rpmdb and then mounted immediately instead
 # of returning and leaving /usr unoverlaid.
-FROM fedora:44 AS overlay-builder
+FROM registry.fedoraproject.org/fedora@sha256:c1e938afd5dfd7f172fac9168ba8e148fdf41c0517c04849072a15e4bd34eac6 AS overlay-builder
 ARG RAKUOS_SOURCE_REV=7d6a4e9ed535eb00f425ef7261a254a5d0043bab
 RUN dnf5 -y --setopt=install_weak_deps=False install cargo rust curl python3 \
+    && rustc --version \
+    && cargo --version \
     && dnf5 clean all
 COPY build_files/patch_overlay_mount.py /usr/local/libexec/patch_overlay_mount.py
 COPY build_files/initrd-Cargo.lock /src/crates/initrd/Cargo.lock
@@ -22,7 +24,7 @@ RUN set -eux; \
     install -D -m 0755 /out/release/rakuos-overlay-mount /usr/local/bin/rakuos-overlay-mount; \
     test -x /usr/local/bin/rakuos-overlay-mount
 
-FROM quay.io/bootc-devel/fedora-bootc-44-minimal:latest
+FROM quay.io/bootc-devel/fedora-bootc-44-minimal@sha256:03d9e53e46040b1d91441f7776a987dfc136ceb39500daa605237eb0cd211207
 
 ARG RAKUKRISOS_RELEASE=0.1.0
 
@@ -32,18 +34,18 @@ LABEL org.opencontainers.image.description="Fedora 44 bootc Minimal desktop with
 LABEL containers.bootc="1"
 LABEL ostree.bootable="1"
 
-# RakuOS repository and signing key. Fedora repositories remain enabled.
+# RakuOS repository and signing key. The reviewed key is part of this
+# repository so a compromised build-time network endpoint cannot replace it.
+# Primary fingerprint: DF9A06B0DF051609859D3FC518447E77BDBF0EDE
 COPY build_files/rakuos.repo /etc/yum.repos.d/rakuos.repo
+COPY build_files/RPM-GPG-KEY-rakuos /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos
 RUN set -eux; \
-    curl --fail --silent --show-error --location \
-      https://repo.rakuos.org/pubkey.gpg \
-      --output /tmp/RPM-GPG-KEY-rakuos; \
-    install -o root -g root -m 0644 /tmp/RPM-GPG-KEY-rakuos \
-      /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos; \
-    chown root:root /etc/yum.repos.d/rakuos.repo; \
-    chmod 0644 /etc/yum.repos.d/rakuos.repo; \
+    echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' \
+      | sha256sum --check --strict; \
+    chown root:root /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos /etc/yum.repos.d/rakuos.repo; \
+    chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos /etc/yum.repos.d/rakuos.repo; \
     rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos; \
-    rm -f /tmp/RPM-GPG-KEY-rakuos; \
+    echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' | sha256sum --check --strict; \
     test "$(stat -c '%U:%G %a' /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"; \
     test "$(stat -c '%U:%G %a' /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
 
@@ -72,6 +74,9 @@ RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
 COPY config/rum.conf /etc/rum/rum.conf
 COPY build_files/systemd/ /etc/systemd/system/
+# This is a shipped, user-selectable profile. It is deliberately not copied
+# to packages.list and therefore causes no automatic native app installation.
+COPY build_files/desktop-packages.txt /usr/share/rakukrisos/profiles/desktop-packages.txt
 
 # Starting from Fedora Minimal means all RakuOS state contracts must be seeded
 # explicitly. No default native applications are installed at boot: an empty
@@ -88,40 +93,11 @@ RUN set -eux; \
     /usr/libexec/rakuos/generate-base-manifest; \
     test -s /usr/share/rakuos/base-manifest.txt
 
-# rakuos-core's RPM %post may generate an initramfs under /boot. A bootc image
-# instead carries initramfs next to the kernel under /usr/lib/modules/$kver.
-# Rebuild after replacing the overlay binary and fail if the module/binary are
-# not really present in the initramfs. Fedora bootc intentionally has
-# /root -> /var/roothome; that target is absent at image-build time and dracut
-# otherwise fails trying to copy /root. Temporarily materialize /root only for
-# dracut, then restore the bootc symlink exactly as it was.
-RUN set -eux; \
-    root_was_symlink=0; \
-    root_target=''; \
-    if [ -L /root ]; then \
-      root_was_symlink=1; \
-      root_target="$(readlink /root)"; \
-      rm -f /root; \
-      install -d -m 0700 /root; \
-    fi; \
-    found_kernel=0; \
-    for moddir in /usr/lib/modules/*; do \
-      [ -d "$moddir" ] || continue; \
-      kver="${moddir##*/}"; \
-      [ -e "$moddir/vmlinuz" ] || continue; \
-      found_kernel=1; \
-      dracut --force --no-hostonly "$moddir/initramfs.img" "$kver"; \
-      lsinitrd "$moddir/initramfs.img" | grep -Fq 'usr/lib/rakuos/rakuos-overlay-mount'; \
-      lsinitrd "$moddir/initramfs.img" | grep -Fq 'usr/lib/systemd/system/rakuos-overlay-mount.service'; \
-      lsinitrd "$moddir/initramfs.img" | grep -Fq 'initrd-root-fs.target.wants/rakuos-overlay-mount.service'; \
-    done; \
-    [ "$found_kernel" -eq 1 ]; \
-    if [ "$root_was_symlink" -eq 1 ]; then \
-      rm -rf /root; \
-      ln -s "$root_target" /root; \
-    fi; \
-    rm -f /boot/initramfs-*.img; \
-    test -z "$(find /boot -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null)"
+# Rebuild the bootc initramfs only after replacing the overlay binary. The
+# helper owns the temporary /root materialization and restores its bootc
+# symlink from an EXIT trap, including when dracut or validation fails.
+COPY build_files/rebuild-initramfs.sh /usr/local/libexec/rebuild-rakukrisos-initramfs
+RUN /usr/local/libexec/rebuild-rakukrisos-initramfs
 
 # Keep Fedora stock kernel + SELinux userspace for the first deployment tests.
 # Security-stack changes come only after boot/update/rollback behavior is proven.
@@ -151,6 +127,7 @@ RUN set -eux; \
     systemctl --root=/ is-enabled plasmalogin.service; \
     test -s /usr/share/rakuos/protected-packages.txt; \
     test -s /usr/share/rakuos/base-manifest.txt; \
+    test -s /usr/share/rakukrisos/profiles/desktop-packages.txt; \
     test -e /usr/share/factory/var/lib/rakuos/packages.list; \
     test ! -s /usr/share/factory/var/lib/rakuos/packages.list; \
     test ! -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \

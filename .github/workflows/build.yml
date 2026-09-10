@@ -2,6 +2,12 @@ name: Build and Publish RakuKrisOS
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the immutable SHA tag and latest (main branch only)
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -18,7 +24,9 @@ permissions:
 
 concurrency:
   group: rakukrisos-${{ github.ref }}
-  cancel-in-progress: true
+  # PR iterations may supersede one another; a main build must finish so that
+  # publication cannot be silently cancelled between the SHA and latest tags.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   REGISTRY: ghcr.io
@@ -53,7 +61,6 @@ jobs:
           buildah bud \
             --pull=always \
             --format oci \
-            --build-arg FEDORA_VERSION=44 \
             --tag "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}" \
             --tag "${REGISTRY}/${IMAGE_NAME}:latest" \
             -f Containerfile .
@@ -120,7 +127,7 @@ jobs:
       # Keep docker/login-action because this exact combination with rootless
       # Buildah successfully published the previous image to GHCR.
       - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -130,19 +137,19 @@ jobs:
       # Do not force compression here. The proven Buildah push handled registry
       # compression itself and successfully published the image.
       - name: Push immutable image
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           set -euxo pipefail
           buildah push "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
 
       - name: Push latest image
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           set -euxo pipefail
           buildah push "${REGISTRY}/${IMAGE_NAME}:latest"
 
       - name: Print bootc switch command
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           echo "Image: ${REGISTRY}/${IMAGE_NAME}:latest"
           echo "Switch: sudo bootc switch --transport container ${REGISTRY}/${IMAGE_NAME}:latest"
