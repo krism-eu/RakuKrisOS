@@ -3,14 +3,18 @@ set -Eeuo pipefail
 
 root_was_symlink=0
 root_target=""
+initramfs_listing=""
 
-restore_root() {
+cleanup() {
+    if [[ -n "${initramfs_listing}" ]]; then
+        rm -f -- "${initramfs_listing}"
+    fi
     if [[ "${root_was_symlink}" -eq 1 ]]; then
         rm -rf -- /root
         ln -s -- "${root_target}" /root
     fi
 }
-trap restore_root EXIT
+trap cleanup EXIT
 
 if [[ -L /root ]]; then
     root_was_symlink=1
@@ -30,12 +34,16 @@ for moddir in /usr/lib/modules/*; do
     found_kernel=1
 
     dracut --force --no-hostonly "${moddir}/initramfs.img" "${kver}"
-    lsinitrd "${moddir}/initramfs.img" |
-        grep -Fq 'usr/lib/rakuos/rakuos-overlay-mount'
-    lsinitrd "${moddir}/initramfs.img" |
-        grep -Fq 'usr/lib/systemd/system/rakuos-overlay-mount.service'
-    lsinitrd "${moddir}/initramfs.img" |
-        grep -Fq 'initrd-root-fs.target.wants/rakuos-overlay-mount.service'
+
+    # Avoid lsinitrd | grep -q under pipefail: grep intentionally closes the
+    # pipe after a match, which makes lsinitrd exit with SIGPIPE (141).
+    initramfs_listing="$(mktemp)"
+    lsinitrd "${moddir}/initramfs.img" > "${initramfs_listing}"
+    grep -Fq 'usr/lib/rakuos/rakuos-overlay-mount' "${initramfs_listing}"
+    grep -Fq 'usr/lib/systemd/system/rakuos-overlay-mount.service' "${initramfs_listing}"
+    grep -Fq 'initrd-root-fs.target.wants/rakuos-overlay-mount.service' "${initramfs_listing}"
+    rm -f -- "${initramfs_listing}"
+    initramfs_listing=""
 done
 [[ "${found_kernel}" -eq 1 ]]
 
