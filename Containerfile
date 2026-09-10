@@ -25,19 +25,31 @@ RUN set -eux; \
     test -x /usr/local/bin/rakuos-overlay-mount
 
 # Build our hardened base-protect daemon from the same pinned RakuOS revision.
-# Cargo.lock and both Rust sources are fetched by immutable commit URL; the
-# patcher refuses to proceed if the reviewed upstream code no longer matches.
-COPY build_files/base-protect/ /src/base-protect/
+# Recreate the exact upstream Cargo workspace so its lockfile remains binding;
+# only the selected daemon and its library dependency are actually compiled.
 COPY build_files/patch_base_protect.py /usr/local/libexec/patch_base_protect.py
 RUN set -eux; \
     base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
-    mkdir -p /src/base-protect/src /src/base-protect/overlay/src; \
+    mkdir -p \
+      /src/base-protect/crates/systems/src/bin \
+      /src/base-protect/crates/overlay/src \
+      /src/base-protect/crates/pkgmgr \
+      /src/base-protect/crates/initrd; \
+    curl -fL "$base/Cargo.toml" -o /src/base-protect/Cargo.toml; \
     curl -fL "$base/Cargo.lock" -o /src/base-protect/Cargo.lock; \
-    curl -fL "$base/crates/systems/src/bin/base_protect.rs" -o /src/base-protect/src/main.rs; \
-    curl -fL "$base/crates/overlay/src/lib.rs" -o /src/base-protect/overlay/src/lib.rs; \
+    for crate in systems overlay pkgmgr initrd; do \
+      curl -fL "$base/crates/$crate/Cargo.toml" \
+        -o "/src/base-protect/crates/$crate/Cargo.toml"; \
+    done; \
+    curl -fL "$base/crates/systems/src/bin/base_protect.rs" \
+      -o /src/base-protect/crates/systems/src/bin/base_protect.rs; \
+    curl -fL "$base/crates/overlay/src/lib.rs" \
+      -o /src/base-protect/crates/overlay/src/lib.rs; \
     python3 /usr/local/libexec/patch_base_protect.py; \
     cargo build --locked --release \
       --manifest-path /src/base-protect/Cargo.toml \
+      --package rakuos-systems \
+      --bin rakuos-base-protect \
       --target-dir /out-base-protect; \
     test -x /out-base-protect/release/rakuos-base-protect; \
     grep -aFq 'RakuKrisOS hardened build' /out-base-protect/release/rakuos-base-protect; \

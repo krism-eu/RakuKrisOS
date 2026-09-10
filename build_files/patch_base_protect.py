@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-SOURCE = Path("/src/base-protect/src/main.rs")
+SOURCE = Path("/src/base-protect/crates/systems/src/bin/base_protect.rs")
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
