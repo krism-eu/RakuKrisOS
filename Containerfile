@@ -1,5 +1,5 @@
-# Build only the initrd overlay binary we need, from a pinned RakuOS source
-# revision. RakuKrisOS patches one important first-boot behavior: an empty
+# Build the two RakuOS binaries whose safety properties RakuKrisOS changes,
+# from one pinned upstream revision. The initrd patch fixes first boot: an empty
 # upperdir is seeded with the base rpmdb and then mounted immediately instead
 # of returning and leaving /usr unoverlaid.
 FROM registry.fedoraproject.org/fedora@sha256:c1e938afd5dfd7f172fac9168ba8e148fdf41c0517c04849072a15e4bd34eac6 AS overlay-builder
@@ -23,6 +23,26 @@ RUN set -eux; \
     test -x /out/release/rakuos-overlay-mount; \
     install -D -m 0755 /out/release/rakuos-overlay-mount /usr/local/bin/rakuos-overlay-mount; \
     test -x /usr/local/bin/rakuos-overlay-mount
+
+# Build our hardened base-protect daemon from the same pinned RakuOS revision.
+# Cargo.lock and both Rust sources are fetched by immutable commit URL; the
+# patcher refuses to proceed if the reviewed upstream code no longer matches.
+COPY build_files/base-protect/ /src/base-protect/
+COPY build_files/patch_base_protect.py /usr/local/libexec/patch_base_protect.py
+RUN set -eux; \
+    base="https://raw.githubusercontent.com/krism-eu/RakuKrisOS/${RAKUOS_SOURCE_REV}/packages/rakuos-core"; \
+    mkdir -p /src/base-protect/src /src/base-protect/overlay/src; \
+    curl -fL "$base/Cargo.lock" -o /src/base-protect/Cargo.lock; \
+    curl -fL "$base/crates/systems/src/bin/base_protect.rs" -o /src/base-protect/src/main.rs; \
+    curl -fL "$base/crates/overlay/src/lib.rs" -o /src/base-protect/overlay/src/lib.rs; \
+    python3 /usr/local/libexec/patch_base_protect.py; \
+    cargo build --locked --release \
+      --manifest-path /src/base-protect/Cargo.toml \
+      --target-dir /out-base-protect; \
+    test -x /out-base-protect/release/rakuos-base-protect; \
+    grep -aFq 'RakuKrisOS hardened build' /out-base-protect/release/rakuos-base-protect; \
+    install -D -m 0755 /out-base-protect/release/rakuos-base-protect \
+      /usr/local/bin/rakuos-base-protect
 
 FROM quay.io/bootc-devel/fedora-bootc-44-minimal@sha256:03d9e53e46040b1d91441f7776a987dfc136ceb39500daa605237eb0cd211207
 
@@ -69,7 +89,11 @@ RUN dnf5 -y --setopt=install_weak_deps=False install \
         rakuos-core rakuos-rum rum-dnf-shim
 COPY --from=overlay-builder /usr/local/bin/rakuos-overlay-mount \
     /usr/lib/rakuos/initrd/rakuos-overlay-mount
-RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
+COPY --from=overlay-builder /usr/local/bin/rakuos-base-protect \
+    /usr/libexec/rakuos/rakuos-base-protect
+RUN chmod 0755 \
+    /usr/lib/rakuos/initrd/rakuos-overlay-mount \
+    /usr/libexec/rakuos/rakuos-base-protect
 
 COPY config/rum.conf /etc/rum/rum.conf
 COPY build_files/systemd/ /etc/systemd/system/
@@ -114,6 +138,8 @@ RUN set -eux; \
     test -x /usr/bin/ostree; \
     test -x /usr/bin/rum; \
     test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount; \
+    test -x /usr/libexec/rakuos/rakuos-base-protect; \
+    grep -aFq 'RakuKrisOS hardened build' /usr/libexec/rakuos/rakuos-base-protect; \
     test "$(stat -c '%U:%G %a' /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"; \
     test "$(stat -c '%U:%G %a' /etc/yum.repos.d/rakuos.repo)" = "root:root 644"; \
     test -e /usr/lib/dracut/modules.d/90rakuos-overlay/module-setup.sh; \
