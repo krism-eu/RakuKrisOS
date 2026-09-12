@@ -87,7 +87,9 @@ RUN set -eux; \
 # the dnf/dnf5 command-line package manager.
 RUN dnf5 -y --setopt=install_weak_deps=False install \
         rakuos-core rakuos-rum rum-dnf-shim
-COPY --from=overlay-builder /usr/local/bin/rakuos-overlay-mount \
+# The workflow extracts this verified artifact from the named builder stage.
+# Avoid COPY --from here: rootless Buildah has proven unreliable for this path.
+COPY build_artifacts/rakuos-overlay-mount \
     /usr/lib/rakuos/initrd/rakuos-overlay-mount
 RUN chmod 0755 /usr/lib/rakuos/initrd/rakuos-overlay-mount
 
