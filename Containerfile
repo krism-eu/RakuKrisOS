@@ -169,5 +169,9 @@ RUN set -eux; \
     test ! -e /usr/share/factory/var/lib/rakuos/overlay/upper/share/rakukrisos/.overlay-bootstrap; \
     test -L /root; \
     rpm -q glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it; \
+    rpm -q xcb-util-cursor; \
+    test -e /usr/lib64/qt6/plugins/platforms/libqxcb.so; \
+    test -z "$(ldd /usr/lib64/qt6/plugins/platforms/libqxcb.so | awk '/not found/{print}')"; \
+    test -z "$(ldd /usr/libexec/plasma-login-greeter | awk '/not found/{print}')"; \
     ! rpm -q glibc-all-langpacks >/dev/null 2>&1; \
     bootc container lint
