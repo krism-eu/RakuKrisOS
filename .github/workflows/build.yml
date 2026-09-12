@@ -45,6 +45,36 @@ jobs:
       - name: Normalize image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
+      - name: Build and extract pinned overlay artifact
+        run: |
+          set -euxo pipefail
+          rm -rf build_artifacts
+          mkdir -p build_artifacts
+
+          buildah bud \
+            --pull=always \
+            --format oci \
+            --target overlay-builder \
+            --tag localhost/rakukrisos-overlay-builder \
+            -f Containerfile .
+
+          builder_ctr="$(buildah from localhost/rakukrisos-overlay-builder)"
+          cleanup_builder() {
+            buildah rm "$builder_ctr" >/dev/null 2>&1 || true
+            buildah rmi localhost/rakukrisos-overlay-builder >/dev/null 2>&1 || true
+          }
+          trap cleanup_builder EXIT
+
+          buildah run "$builder_ctr" -- \
+            cat /usr/local/bin/rakuos-overlay-mount \
+            > build_artifacts/rakuos-overlay-mount
+
+          chmod 0755 build_artifacts/rakuos-overlay-mount
+          test -s build_artifacts/rakuos-overlay-mount
+          test -x build_artifacts/rakuos-overlay-mount
+          file build_artifacts/rakuos-overlay-mount
+          sha256sum build_artifacts/rakuos-overlay-mount
+
       # Proven model from the previously successful Fedora 44 Minimal build:
       # Buildah runs rootless for build, validation and push.
       - name: Build OCI image
