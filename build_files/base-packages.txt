@@ -27,6 +27,7 @@ kcm-plasmalogin
 kde-settings-plasmalogin
 kde-settings-plasma
 plasma-keyboard
+xcb-util-cursor
 
 # Core desktop integration required for a usable Plasma session
 plasma-nm
