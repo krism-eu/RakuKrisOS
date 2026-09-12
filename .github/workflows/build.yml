@@ -67,7 +67,7 @@ jobs:
             bootc ostree rakuos-core rakuos-rum rum-dnf-shim \
             plasma-workspace plasma-desktop kwin \
             plasma-login-manager kcm-plasmalogin kde-settings-plasmalogin \
-            pipewire-pulseaudio \
+            xcb-util-cursor pipewire-pulseaudio \
             glibc-langpack-en glibc-langpack-it langpacks-core-en langpacks-core-it
 
           buildah run rakukrisos-validation -- sh -euxc '
@@ -77,6 +77,9 @@ jobs:
             grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf
 
             test -e /usr/lib/systemd/system/plasmalogin.service
+            test -e /usr/lib64/qt6/plugins/platforms/libqxcb.so
+            test -z "$(ldd /usr/lib64/qt6/plugins/platforms/libqxcb.so | awk '\''/not found/{print}'\'')"
+            test -z "$(ldd /usr/libexec/plasma-login-greeter | awk '\''/not found/{print}'\'')"
             test -e /usr/lib/systemd/system/rakuos-overlay-sync.service
             test -e /usr/lib/systemd/system/rakuos-base-protect.service
             test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount
