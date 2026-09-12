@@ -2,6 +2,12 @@ name: Build and Publish RakuKrisOS
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the immutable SHA tag and latest (main branch only)
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -18,7 +24,9 @@ permissions:
 
 concurrency:
   group: rakukrisos-${{ github.ref }}
-  cancel-in-progress: true
+  # PR iterations may supersede one another; a main build must finish so that
+  # publication cannot be silently cancelled between the SHA and latest tags.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   REGISTRY: ghcr.io
@@ -43,7 +51,9 @@ jobs:
           buildah --version
 
       - name: Normalize image name
-        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+        run: |
+          echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+          echo "TEST_TAG=test-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       # Proven model from the previously successful Fedora 44 Minimal build:
       # Buildah runs rootless for build, validation and push.
@@ -53,9 +63,9 @@ jobs:
           buildah bud \
             --pull=always \
             --format oci \
-            --build-arg FEDORA_VERSION=44 \
             --tag "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}" \
             --tag "${REGISTRY}/${IMAGE_NAME}:latest" \
+            --tag "${REGISTRY}/${IMAGE_NAME}:${TEST_TAG}" \
             -f Containerfile .
 
       - name: Validate image contents
@@ -73,12 +83,21 @@ jobs:
           buildah run rakukrisos-validation -- sh -euxc '
             test -x /usr/bin/rum
             test -r /etc/rum/rum.conf
+            echo 'db4c3b5e4c5e662bdb98078cd289d07206142c7c4466655232c50ccb3028eada  /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos' | sha256sum --check --strict
+            test -s /usr/share/rakukrisos/profiles/desktop-packages.txt
+            test "$(stat -c "%U:%G %a" /etc/pki/rpm-gpg/RPM-GPG-KEY-rakuos)" = "root:root 644"
+            test "$(stat -c "%U:%G %a" /etc/yum.repos.d/rakuos.repo)" = "root:root 644"
             grep -q "install_weak_deps=0" /etc/rum/rum.conf
             grep -q "clean_requirements_on_remove=0" /etc/rum/rum.conf
 
             test -e /usr/lib/systemd/system/plasmalogin.service
             test -e /usr/lib/systemd/system/rakuos-overlay-sync.service
             test -e /usr/lib/systemd/system/rakuos-base-protect.service
+            test -e /etc/systemd/system/rakuos-base-protect.service.d/rakukrisos.conf
+            grep -qx "Restart=on-failure" /etc/systemd/system/rakuos-base-protect.service.d/rakukrisos.conf
+            systemd-analyze verify rakuos-base-protect.service
+            systemctl --root=/ is-enabled rakuos-base-protect.service
+            systemctl --root=/ is-enabled plasmalogin.service
             test -x /usr/lib/rakuos/initrd/rakuos-overlay-mount
             test -e /usr/lib/dracut/modules.d/90rakuos-overlay/module-setup.sh
 
@@ -98,8 +117,9 @@ jobs:
             for img in /usr/lib/modules/*/initramfs.img; do
               test -f "$img" || continue
               found_initramfs=1
-              lsinitrd "$img" | grep -q rakuos-overlay-mount
-              lsinitrd "$img" | grep -q 90rakuos-overlay
+              lsinitrd "$img" | grep -Fq usr/lib/rakuos/rakuos-overlay-mount
+              lsinitrd "$img" | grep -Fq usr/lib/systemd/system/rakuos-overlay-mount.service
+              lsinitrd "$img" | grep -Fq initrd-root-fs.target.wants/rakuos-overlay-mount.service
             done
             test "$found_initramfs" -eq 1
 
@@ -112,7 +132,9 @@ jobs:
       # Keep docker/login-action because this exact combination with rootless
       # Buildah successfully published the previous image to GHCR.
       - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: >-
+          (github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))) ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -122,19 +144,31 @@ jobs:
       # Do not force compression here. The proven Buildah push handled registry
       # compression itself and successfully published the image.
       - name: Push immutable image
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           set -euxo pipefail
           buildah push "${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
 
+      - name: Push internal PR test image
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          set -euxo pipefail
+          buildah push "${REGISTRY}/${IMAGE_NAME}:${TEST_TAG}"
+
+      - name: Print internal PR test image
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "Image: ${REGISTRY}/${IMAGE_NAME}:${TEST_TAG}"
+          echo "Source commit: ${GITHUB_SHA}"
+
       - name: Push latest image
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           set -euxo pipefail
           buildah push "${REGISTRY}/${IMAGE_NAME}:latest"
 
       - name: Print bootc switch command
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         run: |
           echo "Image: ${REGISTRY}/${IMAGE_NAME}:latest"
           echo "Switch: sudo bootc switch --transport container ${REGISTRY}/${IMAGE_NAME}:latest"
